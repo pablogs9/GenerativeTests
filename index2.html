@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<title>My first three.js app</title>
+		<style>
+			body { margin: 0; }
+
+            /* current_rules  is floating and with semitransparent background*/
+            #current_rules {
+                position: absolute;
+                top: 0;
+                left: 0;
+                padding: 10px;
+                background-color: rgba(0, 0, 0, 0.5);
+                color: white;
+            }
+		</style>
+	</head>
+    <script type="importmap">
+        {
+          "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.172.0/examples/jsm/"
+          }
+        }
+    </script>
+	<body>
+		<script type="module" src="/main2.js"></script>
+        <div id="current_rules"></div>
+	</body>
+</html>

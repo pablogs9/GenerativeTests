@@ -10,30 +10,22 @@ class WaveFunctionCollapse2D {
      * @param {number} width          Width of the grid
      * @param {number} height         Height of the grid
      * @param {object} adjacency      The adjacency rules object
-     * @param {Array}  initial_conds   Array of {x, y, value} constraints
+     * @param {Array}  initialConds   Array of {x, y, value} constraints
+     * @param {function} onStep       Callback to be called during propagation
      */
-    constructor(width, height, adjacency, initial_conds = []) {
+    constructor(width, height, adjacency, initialConds = [], onStep = null) {
         this.width = width;
         this.height = height;
         this.adjacency = adjacency;
-        this.initial_conds = initial_conds;
-
-        this.reset();
-    }
-
-    reset(adjacency=null)
-    {
-        if (adjacency) {
-            this.adjacency = adjacency;
-        }
+        this.onStep = onStep;
 
         // -- Initialize wave: 2D array of sets, each containing all possible tiles
-        this.wave = Array.from({ length: this.height }, () =>
-            Array.from({ length: this.width }, () => new Set(Object.keys(this.adjacency)))
+        this.wave = Array.from({ length: height }, () =>
+            Array.from({ length: width }, () => new Set(Object.keys(adjacency)))
         );
 
         // -- Apply initial conditions
-        for (const { x, y, value } of this.initial_conds) {
+        for (const { x, y, value } of initialConds) {
             this.wave[y][x] = new Set([value]);
         }
 
@@ -105,6 +97,11 @@ class WaveFunctionCollapse2D {
         while (queue.length > 0) {
             const { x, y } = queue.shift();
             const currentPossibilities = this.wave[y][x];
+
+            // Optional: call onStep callback so you can visualize partial changes
+            if (this.onStep) {
+                this.onStep(this.getMostProbableWave());
+            }
 
             // For each neighbor in 4 directions
             const neighbors = [
@@ -332,10 +329,10 @@ class AdjacencyMatrix {
             for (let angle of possible_angles) {
                 const new_key = `${key} ${angle}`;
                 this.result[new_key] = {};
-                this.result[new_key].up = item[this._rotate_adj("up", angle)].map((v) => this._rotate_label(v, angle));
-                this.result[new_key].right = item[this._rotate_adj("right", angle)].map((v) => this._rotate_label(v, angle));
-                this.result[new_key].down = item[this._rotate_adj("down", angle)].map((v) => this._rotate_label(v, angle));
-                this.result[new_key].left = item[this._rotate_adj("left", angle)].map((v) => this._rotate_label(v, angle));
+                this.result[new_key].up = item[this.rotate_adj("up", angle)].map((v) => this.rotate_label(v, angle, this.adjacency[name].simmetry));
+                this.result[new_key].right = item[this.rotate_adj("right", angle)].map((v) => this.rotate_label(v, angle, this.adjacency[name].simmetry));
+                this.result[new_key].down = item[this.rotate_adj("down", angle)].map((v) => this.rotate_label(v, angle, this.adjacency[name].simmetry));
+                this.result[new_key].left = item[this.rotate_adj("left", angle)].map((v) => this.rotate_label(v, angle, this.adjacency[name].simmetry));
             }
         }
 
@@ -375,14 +372,24 @@ class AdjacencyMatrix {
         for (let key in this.result) {
             this.result[key].weight = Math.ceil(this.result[key].weight / minWeight);
         }
-
     }
 
-    _rotate_label(item, rotation) {
+    static adjust_angle_simmetry(angle, simmetry) {
+        if (simmetry == 4) {
+            return (angle) % 360;
+        }
+        else if (simmetry == 2) {
+            return (angle) % 180;
+        }
+        else {
+            return 0;
+        }
+    }
+
+    static rotate_label(item, rotation, simmetry) {
         const parts = item.split(' ');
         const name = parts[0];
         let angle = parseInt(parts[1]);
-        const simmetry = this.adjacency[name].simmetry;
 
         if (simmetry == 4) {
             angle = (angle + rotation) % 360;
@@ -398,7 +405,7 @@ class AdjacencyMatrix {
         return `${name} ${angle}`;
     }
 
-    _rotate_adj(adj, rotation) {
+    static rotate_adj(adj, rotation) {
         const angles = ['up', 'right', 'down', 'left'];
         const adj_pos = angles.indexOf(adj);
         const inc = rotation / 90;
@@ -428,9 +435,32 @@ class SceneController {
     constructor(object_names) {
         this.objects = {};
         this.object_names = object_names;
+        this.placed_tiles = [];
     }
 
-    async draw_scene(wave) {
+    get_tile_at_position(x, y) {
+        for (let tile of this.placed_tiles) {
+            if (tile.userData.x == x && tile.userData.y == y) {
+                return tile;
+            }
+        }
+
+        return null;
+    }
+
+    object_sample() {
+        const keys = Object.keys(this.objects);
+
+        let result = [];
+        // Add all objects in a single row
+        for (let i = 0; i < keys.length; i++) {
+            result.push(keys[i] + ' 0');
+        }
+
+        return [result];
+    }
+
+    async draw_scene(wave, extra_userdata = {}) {
         // Clear scene
         let to_clear_objects = [];
         for (let i = scene.children.length - 1; i >= 0; i--) {
@@ -470,15 +500,29 @@ class SceneController {
 
                 let obj_copy = this.objects[item].clone();
 
-                obj_copy.position.set(x, z, y);
+                obj_copy.position.set(x - 0.5, z, y - 0.5);
                 obj_copy.rotation.y = THREE.MathUtils.degToRad(angle);
+
+                // Add obj user data
+                obj_copy.userData =
+                {
+                    tile: true,
+                    x: x,
+                    y: y,
+                    item: item,
+                }
+
+                // Add extra user data
+                for (let key in extra_userdata) {
+                    obj_copy.userData[key] = extra_userdata[key];
+                }
 
                 scene.add(obj_copy);
 
                 // If object name contains rail, add also a floor
                 if (item.includes('rail')) {
                     let floor = this.objects['floor-wood'].clone();
-                    floor.position.set(x, 0, y);
+                    floor.position.set(x - 0.5, 0, y - 0.5);
                     scene.add(floor);
                 }
             }
@@ -491,7 +535,9 @@ class SceneController {
 
     async load_objects() {
         for (let object_name of this.object_names) {
-            this.objects[object_name] = await this._load_obj_item(object_name);
+            const object = await this._load_obj_item(object_name);
+            this.objects[object_name] = object.children[0];
+            console.log(`Loaded ${object_name}`);
         }
     }
 
@@ -535,27 +581,36 @@ class SceneController {
     }
 }
 
-let scene, camera, renderer, controls, stats;
+let scene, camera, renderer, controls, stats, raycaster, mouse;
 let wfc, scene_controller;
-let heuristic;
 
-const WIDTH = 15;
-const HEIGHT = 15;
+// Utils for UI
+let selected_tile = null;
+let is_dragging = false;
+let is_alt_drag = false;
+let init_alt_drag = [0, 0];
+let plane;
 
-let timeout = 1;
-function step(){
-    if (!wfc.isDone()) {
-        let wave = wfc.step();
-        scene_controller.draw_scene(wave.wave);
-        console.log('Step');
-        setTimeout(step, timeout);
-    }
-    else {
-        let wave = wfc.getOutput();
-        scene_controller.draw_scene(wave);
-        console.log('Finished');
-    }
-}
+const all_objects = {
+    'bowl-corner-inner': { simmetry: 4 },
+    'bowl-corner-outer': { simmetry: 4 },
+    'bowl-side': { simmetry: 4 },
+    'floor-concrete': { simmetry: 1 },
+    'floor-wood': { simmetry: 1 },
+    'half-pipe': { simmetry: 4 },
+    'obstacle-box': { simmetry: 4 },
+    'obstacle-end': { simmetry: 4 },
+    'obstacle-middle': { simmetry: 4 },
+    'pallet': { simmetry: 4 },
+    'rail-curve': { simmetry: 2 },
+    'rail-high': { simmetry: 2 },
+    'rail-low': { simmetry: 2 },
+    'rail-slope': { simmetry: 4 },
+    'skateboard': { simmetry: 4 },
+    'steps': { simmetry: 4 },
+    'structure-platform': { simmetry: 4 },
+    'structure-wood': { simmetry: 4 },
+};
 
 async function init() {
 
@@ -583,200 +638,198 @@ async function init() {
     directionalLight.position.set(5, 10, 7);
     scene.add(directionalLight);
 
-    // const heuristic = {
-    //     'steps':
-    //     {
-    //         simmetry: 4,
-    //         weight: 2,
-    //         up: ['floor-wood-HIGH 0'],
-    //         right: ['steps 0', 'floor-wood 0'],
-    //         down: [ 'floor-wood 0'],
-    //         left: ['steps 0','floor-wood 0']
-    //     },
-    //     'floor-wood-HIGH': {
-    //         simmetry: 1,
-    //         up: ['floor-wood-HIGH 0'],
-    //         right: ['floor-wood-HIGH 0'],
-    //         down: ['floor-wood-HIGH 0'],
-    //         left: ['floor-wood-HIGH 0']
-    //     },
-    //     'bowl-corner-outer': {
-    //         simmetry: 4,
-    //         up: ['bowl-side 90', 'bowl-corner-outer 90'],
-    //         right: ['floor-wood 0'],
-    //         down: ['floor-wood 0'],
-    //         left: ['bowl-side 0', 'bowl-corner-outer 270']
-    //     },
-    //     'half-pipe': {
-    //         simmetry: 4,
-    //         weight: 0.1,
-    //         up: ['half-pipe 180', 'floor-concrete 0'],
-    //         right: ['half-pipe 0', 'bowl-corner-outer 0'],
-    //         down: ['half-pipe 180', 'floor-wood 0'],
-    //         left: ['half-pipe 0', 'bowl-corner-outer 270']
-    //     },
-    //     'bowl-side': {
-    //         simmetry: 4,
-    //         up: ['bowl-side 180', 'floor-concrete 0'],
-    //         right: ['bowl-side 0', 'bowl-corner-outer 0'],
-    //         down: ['bowl-side 180', 'floor-wood 0'],
-    //         left: ['bowl-side 0', 'bowl-corner-outer 270']
-    //     },
-    //     'bowl-corner-inner': {
-    //         simmetry: 4,
-    //         up: ['floor-concrete 0'],
-    //         right: ['bowl-side 0', 'bowl-corner-inner 270', 'bowl-corner-outer 0'],
-    //         down: ['bowl-side 90', 'bowl-corner-inner 90', 'bowl-corner-outer 0'],
-    //         left: ['floor-concrete 0']
-    //     },
-    //     'floor-wood': {
-    //         simmetry: 1,
-    //         weight: 1,
-    //         up: ['floor-wood 0'],
-    //         right: ['floor-wood 0'],
-    //         down: ['floor-wood 0'],
-    //         left: ['floor-wood 0']
-    //     },
-    //     'floor-concrete': {
-    //         simmetry: 1,
-    //         weight: 0.1,
-    //         up: ['floor-concrete 0'],
-    //         right: ['floor-concrete 0'],
-    //         down: ['floor-concrete 0'],
-    //         left: ['floor-concrete 0']
-    //     },
-    //     'rail-high': {
-    //         simmetry: 2,
-    //         weight: 0.1,
-    //         up: ['rail-high 0', 'rail-slope 180'],
-    //         right: ['floor-wood 0'],
-    //         down: ['rail-high 0', 'rail-slope 0'],
-    //         left: ['floor-wood 0']
-    //     },
-    //     'rail-low': {
-    //         simmetry: 2,
-    //         weight: 0.1,
-    //         up: ['rail-low 0', 'rail-slope 0'],
-    //         right: ['floor-wood 0'],
-    //         down: ['rail-low 0', 'rail-slope 180'],
-    //         left: ['floor-wood 0']
-    //     },
-    //     'rail-slope': {
-    //         simmetry: 4,
-    //         up: [],
-    //         weight: 0.1,
-    //         right: ['floor-wood 0'],
-    //         down: ['floor-wood 0'],
-    //         left: ['floor-wood 0']
-    //     },
-    // };
-
-    heuristic =
-    {
-        "bowl-corner-inner": {
-          "simmetry": 4,
-          "up": [
-            "floor-wood 0"
-          ],
-          "right": [
-            "bowl-side 0",
-            "bowl-corner-inner 270"
-          ],
-          "down": [
-            "bowl-corner-inner 90",
-            "bowl-side 90"
-          ],
-          "left": [
-            "floor-wood 0"
-          ]
-        },
-        "floor-wood": {
-          "simmetry": 1,
-          "up": [
-            "floor-wood 0",
-            "bowl-corner-inner 90",
-            "bowl-side 180",
-            "bowl-corner-inner 180"
-          ],
-          "right": [
-            "floor-wood 0",
-            "bowl-corner-inner 0",
-            "bowl-corner-inner 90",
-            "bowl-side 90"
-          ],
-          "down": [
-            "floor-wood 0",
-            "bowl-corner-inner 0",
-            "bowl-side 0",
-            "bowl-corner-inner 270"
-          ],
-          "left": [
-            "floor-wood 0",
-            "bowl-corner-inner 270",
-            "bowl-corner-inner 180",
-            "bowl-side 270"
-          ]
-        },
-        "bowl-side": {
-          "simmetry": 4,
-          "up": [
-            "floor-wood 0"
-          ],
-          "right": [
-            "bowl-side 0",
-            "bowl-corner-inner 270"
-          ],
-          "down": [
-            "bowl-side 180"
-          ],
-          "left": [
-            "bowl-corner-inner 0",
-            "bowl-side 0"
-          ]
-        }
-      }
-
-    scene_controller = new SceneController(Object.keys(heuristic));
+    scene_controller = new SceneController(Object.keys(all_objects));
     await scene_controller.load_objects();
 
-    camera.position.set(WIDTH * 1.5, 20, HEIGHT * 1.5);
+    // const data = new AdjacencyMatrix(heuristic).get_adjacency_matrix();
+
+    const WIDTH = 0;
+    const HEIGHT = 0;
+
+    camera.position.set(WIDTH * 0.5, 10, HEIGHT * 0.5);
     camera.lookAt(WIDTH * 0.5, 0, HEIGHT * 0.5);
     camera.updateProjectionMatrix();
 
-    // --- Initial conditions ---
-    // let initial_conds = [];
+    // Draw scene from wave
+    scene_controller.draw_scene(scene_controller.object_sample(), { store: true });
 
-    // // Set corners
-    // initial_conds.push({ x: 0, y: 0, value: 'bowl-corner-inner 0' });
-    // initial_conds.push({ x: WIDTH - 1, y: 0, value: 'bowl-corner-inner 270' });
-    // initial_conds.push({ x: 0, y: HEIGHT - 1, value: 'bowl-corner-inner 90' });
-    // initial_conds.push({ x: WIDTH - 1, y: HEIGHT - 1, value: 'bowl-corner-inner 180' });
+    // Helper grid for visualization (optional)
+    const gridHelper = new THREE.GridHelper(100, 100);
+    scene.add(gridHelper);
 
-    // // Set sides
-    // for (let x = 1; x < WIDTH - 1; x++) {
-    //     initial_conds.push({ x: x, y: 0, value: 'bowl-side 0' });
-    //     initial_conds.push({ x: x, y: HEIGHT - 1, value: 'bowl-side 180' });
-    // }
+    // Raycaster and mouse vector
+    raycaster = new THREE.Raycaster();
+    mouse = new THREE.Vector2();
 
-    // for (let y = 1; y < HEIGHT - 1; y++) {
-    //     initial_conds.push({ x: 0, y: y, value: 'bowl-side 90' });
-    //     initial_conds.push({ x: WIDTH - 1, y: y, value: 'bowl-side 270' });
-    // }
+    plane = new THREE.Mesh(
+        new THREE.PlaneGeometry(1000, 1000),
+        new THREE.MeshBasicMaterial({ visible: false })
+    );
 
-    const data = new AdjacencyMatrix(heuristic).get_adjacency_matrix()
-    wfc = new WaveFunctionCollapse2D(WIDTH, HEIGHT, data);
+    plane.rotation.x = -Math.PI / 2;
+    scene.add(plane);
 
-    // Start stepping
-    step();
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('contextmenu', onRightClick); // for rotation
 
     animate();
 }
+
+
+function onPointerDown(event) {
+    // Convert mouse position to normalized device coordinates (-1 to +1)
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+    let tileStore = scene.children;
+
+    // Raycast
+    raycaster.setFromCamera(mouse, camera);
+    let intersects = raycaster.intersectObjects([...tileStore, ...scene_controller.placed_tiles], true);
+
+    // Filter by userData.store
+    intersects = intersects.filter(o => o.object.userData.tile);
+
+    if (intersects.length > 0) {
+        const intersectedObject = intersects[0].object;
+
+        // Check if control is pressed
+        const control_click = event.ctrlKey;
+
+        // If we clicked on a store tile, clone it and add to scene
+        if (intersectedObject.userData.store) {
+            selected_tile = intersectedObject.clone();
+            selected_tile.userData.store = false;
+            selected_tile.position.copy(intersectedObject.position);
+
+            scene.add(selected_tile);
+
+            // Also track it in scene_controller.placed_tiles
+            scene_controller.placed_tiles.push(selected_tile);
+        } else if(control_click) {
+            // remove
+            scene.remove(intersectedObject);
+            scene_controller.placed_tiles = scene_controller.placed_tiles.filter(t => t !== intersectedObject);
+        }
+        else {
+            // Otherwise, we clicked on a tile that is already in the scene
+            selected_tile = intersectedObject;
+
+            is_alt_drag = event.altKey;
+            init_alt_drag = [selected_tile.userData.x, selected_tile.userData.y];
+        }
+
+        // Disable controls while dragging
+        controls.enableRotate = false;
+
+        // Begin dragging
+        is_dragging = true;
+    }
+}
+
+function onPointerMove(event) {
+    if (!is_dragging || !selected_tile) return;
+
+    // Convert mouse position
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+    // Raycast against the plane to get an intersection
+    raycaster.setFromCamera(mouse, camera);
+    let planeIntersects = raycaster.intersectObjects([plane], true);
+
+    if (planeIntersects.length > 0) {
+        const point = planeIntersects[0].point;
+
+        // Snap the position to the nearest integer value
+        const snapX = Math.round(point.x);
+        const snapZ = Math.round(point.z);
+
+        selected_tile.userData.x = snapX;
+        selected_tile.userData.y = snapZ;
+
+        // You might want some offset for y if your tiles have height
+        selected_tile.position.set(snapX - 0.5, 0, snapZ - 0.5);
+    }
+}
+
+function onPointerUp(event) {
+    // If alt fill all the way
+    if(is_alt_drag) {
+        const [init_x, init_y] = init_alt_drag;
+        const [end_x, end_y] = [selected_tile.userData.x, selected_tile.userData.y];
+
+        const dx = Math.sign(end_x - init_x);
+        const dy = Math.sign(end_y - init_y);
+
+        for(let x = init_x; x != end_x + 1; x += dx) {
+            for(let y = init_y; y != end_y + 1; y += dy) {
+                const tile = scene_controller.get_tile_at_position(x, y);
+
+                if(!tile) {
+                    const new_tile = selected_tile.clone();
+                    new_tile.userData.x = x;
+                    new_tile.userData.y = y;
+                    new_tile.position.set(x - 0.5, 0, y - 0.5);
+
+                    scene.add(new_tile);
+                    scene_controller.placed_tiles.push(new_tile);
+                }
+            }
+        }
+    }
+
+    // If were moving a tile, remove any other tile in the same position
+    if(selected_tile) {
+        const tile = scene_controller.get_tile_at_position(selected_tile.userData.x, selected_tile.userData.y);
+
+        if(tile && tile !== selected_tile) {
+            scene.remove(tile);
+            scene_controller.placed_tiles = scene_controller.placed_tiles.filter(t => t !== tile);
+        }
+    }
+
+    is_dragging = false;
+    selected_tile = null;
+    controls.enableRotate = true;
+    is_alt_drag = false;
+
+    update_rules();
+}
+
+function onRightClick(event) {
+    // Prevent the default context menu
+    event.preventDefault();
+
+    if (selected_tile) {
+        let current_rotation = THREE.MathUtils.radToDeg(selected_tile.rotation.y);
+
+        // Adjust to simmetry
+        const tile_name = selected_tile.userData.item;
+        const simmetry = all_objects[tile_name].simmetry;
+
+        let new_angle = current_rotation;
+
+        if (simmetry == 4) {
+            new_angle = (current_rotation + 90) % 360;
+        }
+        else if (simmetry == 2) {
+            new_angle = (current_rotation + 90) % 180;
+        }
+
+        selected_tile.rotation.y = THREE.MathUtils.degToRad(new_angle);
+    }
+
+    update_rules();
+}
+
 
 function animate() {
     requestAnimationFrame(animate);
     renderer.render(scene, camera);
     controls.update();
-
 }
 
 window.addEventListener('resize', () => {
@@ -785,34 +838,92 @@ window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// Check on a key pressed
-window.addEventListener('keydown', async (event) => {
-    if (event.key === 'Enter') {
-        // Read JSON from clipboard
-        const clipboardContents = await navigator.clipboard.read();
-        for (const item of clipboardContents) {
-            for (const mimeType of item.types) {
-                if (mimeType === "text/plain") {
-                    const blob = await item.getType("text/plain");
-                    const blobText = await blob.text();
+function update_rules() {
+    // List all tiles that are not store
+    let constrains = {};
+    for (let tile of scene_controller.placed_tiles) {
+        const angle = Math.round(THREE.MathUtils.radToDeg(tile.rotation.y)) % 360;
 
-                    let heuristic = JSON.parse(blobText);
-                    if (heuristic) {
-                        console.log("------------- RESET -------------");
-                        scene_controller = new SceneController(Object.keys(heuristic));
-                        await scene_controller.load_objects();
-                        const data = new AdjacencyMatrix(heuristic).get_adjacency_matrix()
-                        wfc.reset(data);
-                        step();
-                    } else {
-                        throw new Error("Invalid JSON.");
-                    }
-                } else {
-                    throw new Error(`${mimeType} not supported.`);
+        // Set name
+        let name = tile.userData.item;
+
+        // Add to constrains if not already there
+        if (constrains[name] == undefined) {
+            constrains[name] =
+            {
+                simmetry: all_objects[name].simmetry,
+                up: [],
+                right: [],
+                down: [],
+                left: []
+            }
+        }
+
+        // Search adjacents
+        let neighbors = {
+            "right": { dx: 1, dy: 0 },
+            "left": { dx: -1, dy: 0 },
+            "down": { dx: 0, dy: 1 },
+            "up": { dx: 0, dy: -1 }
+        };
+
+        for (let key in neighbors) {
+            let dx = neighbors[key].dx;
+            let dy = neighbors[key].dy;
+
+            let neighbor = scene_controller.get_tile_at_position(tile.userData.x + dx, tile.userData.y + dy);
+
+            if (neighbor) {
+                let neighbor_name = neighbor.userData.item;
+                let neighbor_angle = Math.round(THREE.MathUtils.radToDeg(neighbor.rotation.y)) % 360;
+
+                // Adjust neighbor angle with respect to current tile angle: subtract current angle taking into account positive and negative values
+                neighbor_angle = (neighbor_angle - angle + 360) % 360;
+                // Take into account simmetry
+                neighbor_angle = AdjacencyMatrix.adjust_angle_simmetry(neighbor_angle, all_objects[neighbor_name].simmetry);
+
+                // let neighbor_angle = (Math.round(THREE.MathUtils.radToDeg(neighbor.rotation.y)) + angle) % 360;
+                // neighbor_angle = AdjacencyMatrix.adjust_angle_simmetry(neighbor_angle, all_objects[neighbor_name].simmetry);
+
+                let used_position = AdjacencyMatrix.rotate_adj(key, angle);
+
+                // Add to constrains only if not exists
+                if (!constrains[name][used_position].includes(`${neighbor_name} ${neighbor_angle}`)) {
+                    constrains[name][used_position].push(`${neighbor_name} ${neighbor_angle}`);
                 }
             }
         }
     }
-});
+
+    // Print JSON ready to be used and beautified
+    let string = JSON.stringify(constrains, null, 2);
+
+    // Copy to clipboard
+    navigator.clipboard.writeText(string);
+
+    // Set in current_rules div taking into account indentation
+    let lines = string.split('\n');
+    let min_indent = Infinity;
+    for (let line of lines) {
+        if (line.trim() != '') {
+            let indent = line.search(/\S/);
+            min_indent = Math.min(min_indent, indent);
+        }
+    }
+
+    let result = '';
+    for (let line of lines) {
+        result += line.substring(min_indent) + '\n';
+    }
+
+    document.getElementById('current_rules').innerText = result;
+}
+
+// Check on a key pressed
+window.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+        update_rules();
+    }
+})
 
 init();
