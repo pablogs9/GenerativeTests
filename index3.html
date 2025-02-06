@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Distorted Grid with Perlin, Line Mode & SVG Export</title>
+  <title>Fixed Perlin Field with Collapsible Menu &amp; Session Storage</title>
   <style>
     body {
       margin: 0;
@@ -18,21 +18,52 @@
     }
     /* Controls panel styling */
     .controls {
-      padding: 20px;
+      padding: 0;
       background-color: #f0f0f0;
       border-right: 1px solid #ccc;
-      min-width: 200px;
+      min-width: 220px;
       box-sizing: border-box;
+      overflow-y: auto;
+      transition: width 0.3s ease;
     }
-    .controls label {
+    /* This header always remains visible as the menu toggle */
+    .controls-header {
+      background-color: #ddd;
+      padding: 10px;
+      cursor: pointer;
+      text-align: center;
+      font-weight: bold;
+      user-select: none;
+    }
+    /* All other controls will be wrapped in this container */
+    .controls-content {
+      padding: 20px;
+    }
+    .controls-content label {
       display: block;
       margin-top: 15px;
     }
-    .controls input,
-    .controls select,
-    .controls button {
+    .controls-content input,
+    .controls-content select,
+    .controls-content button {
       width: 100%;
       margin-top: 5px;
+    }
+    /* Styling for the slider limits menu */
+    .slider-limits {
+      margin-top: 20px;
+      border-top: 1px solid #ccc;
+      padding-top: 20px;
+    }
+    .slider-limit-group {
+      margin-bottom: 15px;
+    }
+    /* When the menu is collapsed, hide its content and reduce width */
+    .controls.collapsed .controls-content {
+      display: none;
+    }
+    .controls.collapsed {
+      width: 40px;
     }
     /* Center the canvas in its area */
     .canvas-container {
@@ -47,31 +78,82 @@
 </head>
 <body>
   <div class="container">
-    <div class="controls">
-      <h2>Settings</h2>
+    <div class="controls" id="controlsPanel">
+      <!-- The header serves as the toggle button -->
 
-      <label for="amplitude">Amplitude: <span id="amplitudeValue">10</span></label>
-      <input type="range" id="amplitude" min="0" max="50" step="0.1" value="10" />
+      <div class="controls-content">
+        <h2>Settings</h2>
 
-      <label for="frequency">Frequency: <span id="frequencyValue">0.1</span></label>
-      <input type="range" id="frequency" min="0.01" max="0.5" step="0.01" value="0.1" />
+        <!-- Amplitude slider -->
+        <label for="amplitude">Amplitude: <span id="amplitudeValue">10</span></label>
+        <input type="range" id="amplitude" min="0" max="100" step="0.1" value="10" />
 
-      <label for="noiseType">Noise Type:</label>
-      <select id="noiseType">
-        <option value="sine">SineCosine</option>
-        <option value="random">Random</option>
-        <option value="perlin" selected>Perlin</option>
-      </select>
+        <!-- Frequency slider -->
+        <label for="frequency">Frequency: <span id="frequencyValue">0.1</span></label>
+        <input type="range" id="frequency" min="0.01" max="0.5" step="0.01" value="0.1" />
 
-      <label for="lineMode">Draw Lines:</label>
-      <select id="lineMode">
-        <option value="both" selected>Both</option>
-        <option value="horizontal">Horizontal</option>
-        <option value="vertical">Vertical</option>
-      </select>
+        <!-- Seed text input (instead of a slider) -->
+        <label for="seed">Seed: <span id="seedValue">0</span></label>
+        <input type="text" id="seed" value="0" />
 
-      <button id="redraw" style="margin-top:20px;">Redraw Grid</button>
-      <button id="exportSVG" style="margin-top:20px;">Export SVG</button>
+        <!-- Noise type dropdown -->
+        <label for="noiseType">Noise Type:</label>
+        <select id="noiseType">
+          <option value="sine">SineCosine</option>
+          <option value="random">Random</option>
+          <option value="perlin" selected>Perlin</option>
+        </select>
+
+        <!-- Line mode dropdown -->
+        <label for="lineMode">Draw Lines:</label>
+        <select id="lineMode">
+          <option value="both" selected>Both</option>
+          <option value="horizontal">Horizontal</option>
+          <option value="vertical">Vertical</option>
+        </select>
+
+        <!-- Vertical lines (columns) slider -->
+        <label for="verticalCount">Vertical Lines (Columns): <span id="verticalCountValue">30</span></label>
+        <input type="range" id="verticalCount" min="2" max="100" step="1" value="30" />
+
+        <!-- Horizontal lines (rows) slider -->
+        <label for="horizontalCount">Horizontal Lines (Rows): <span id="horizontalCountValue">40</span></label>
+        <input type="range" id="horizontalCount" min="2" max="100" step="1" value="40" />
+
+        <button id="redraw" style="margin-top:20px;">Redraw Grid</button>
+        <button id="exportSVG" style="margin-top:20px;">Export SVG</button>
+
+        <!-- Slider Limits Menu -->
+        <div class="slider-limits">
+          <h2>Slider Limits</h2>
+          <div class="slider-limit-group">
+            <label for="amplitudeMin">Amplitude Min:</label>
+            <input type="number" id="amplitudeMin" value="0" />
+            <label for="amplitudeMax">Amplitude Max:</label>
+            <input type="number" id="amplitudeMax" value="100" />
+          </div>
+          <div class="slider-limit-group">
+            <label for="frequencyMin">Frequency Min:</label>
+            <input type="number" id="frequencyMin" value="0.01" step="0.01" />
+            <label for="frequencyMax">Frequency Max:</label>
+            <input type="number" id="frequencyMax" value="0.5" step="0.01" />
+          </div>
+          <!-- Seed limits have been removed because seed is now a text input -->
+          <div class="slider-limit-group">
+            <label for="verticalCountMin">Vertical Count Min:</label>
+            <input type="number" id="verticalCountMin" value="2" />
+            <label for="verticalCountMax">Vertical Count Max:</label>
+            <input type="number" id="verticalCountMax" value="100" />
+          </div>
+          <div class="slider-limit-group">
+            <label for="horizontalCountMin">Horizontal Count Min:</label>
+            <input type="number" id="horizontalCountMin" value="2" />
+            <label for="horizontalCountMax">Horizontal Count Max:</label>
+            <input type="number" id="horizontalCountMax" value="100" />
+          </div>
+          <button id="applyLimits" style="margin-top:20px;">Apply Slider Limits</button>
+        </div>
+      </div>
     </div>
 
     <div class="canvas-container">
@@ -80,149 +162,254 @@
   </div>
 
   <script>
+    /***** Configuration & Setup *****/
+    // Define a fixed noise field. Regardless of grid resolution, this field is sampled over the same area.
+    const noiseFieldWidth = 10;
+    const noiseFieldHeight = 10;
+
     // Create an instance of the Perlin noise generator.
-    const noiseGen = new Noise(Math.random());
-    // Offsets for Perlin noise regeneration.
-    let perlinXOffset = 0,
-        perlinYOffset = 0;
+    const noiseGen = new Noise(0);
+    const perlinXOffset = 0;
+    const perlinYOffset = 0;
 
     // Get canvas and context.
     const canvas = document.getElementById("gridCanvas");
     const ctx = canvas.getContext("2d");
 
-    // Grid settings.
-    const cols = 30; // Number of columns
-    const rows = 40; // Number of rows
-    const spacingX = canvas.width / cols;
-    const spacingY = canvas.height / rows;
-
-    // UI elements.
+    // Get UI elements.
     const amplitudeSlider = document.getElementById("amplitude");
     const frequencySlider = document.getElementById("frequency");
+    const seedInput = document.getElementById("seed");  // now a text input
     const noiseTypeSelect = document.getElementById("noiseType");
     const lineModeSelect = document.getElementById("lineMode");
+    const verticalCountSlider = document.getElementById("verticalCount");
+    const horizontalCountSlider = document.getElementById("horizontalCount");
     const redrawButton = document.getElementById("redraw");
     const exportSVGButton = document.getElementById("exportSVG");
 
+    // Display elements.
     const amplitudeValueDisplay = document.getElementById("amplitudeValue");
     const frequencyValueDisplay = document.getElementById("frequencyValue");
+    const seedValueDisplay = document.getElementById("seedValue");
+    const verticalCountValueDisplay = document.getElementById("verticalCountValue");
+    const horizontalCountValueDisplay = document.getElementById("horizontalCountValue");
 
-    // Default parameters.
-    let amplitude = parseFloat(amplitudeSlider.value);
-    let frequency = parseFloat(frequencySlider.value);
-    let noiseType = noiseTypeSelect.value;
-    let lineMode = lineModeSelect.value;
+    // Get slider limits elements.
+    const amplitudeMinInput = document.getElementById("amplitudeMin");
+    const amplitudeMaxInput = document.getElementById("amplitudeMax");
+    const frequencyMinInput = document.getElementById("frequencyMin");
+    const frequencyMaxInput = document.getElementById("frequencyMax");
+    const verticalCountMinInput = document.getElementById("verticalCountMin");
+    const verticalCountMaxInput = document.getElementById("verticalCountMax");
+    const horizontalCountMinInput = document.getElementById("horizontalCountMin");
+    const horizontalCountMaxInput = document.getElementById("horizontalCountMax");
+    const applyLimitsButton = document.getElementById("applyLimits");
 
-    amplitudeValueDisplay.textContent = amplitude;
-    frequencyValueDisplay.textContent = frequency;
+    // Menu toggle button and panel.
+    const controlsPanel = document.getElementById("controlsPanel");
 
-    // Returns a noise value based on the selected type.
-    function getNoise(x, y) {
-      if (noiseType === "sine") {
-        return Math.sin(x * frequency) * Math.cos(y * frequency) * amplitude;
-      } else if (noiseType === "random") {
+    /***** Session Storage: Save and Load Settings *****/
+    function saveSettings() {
+      const settings = {
+        amplitude: amplitudeSlider.value,
+        frequency: frequencySlider.value,
+        seed: seedInput.value,
+        noiseType: noiseTypeSelect.value,
+        lineMode: lineModeSelect.value,
+        verticalCount: verticalCountSlider.value,
+        horizontalCount: horizontalCountSlider.value,
+        amplitudeMin: amplitudeMinInput.value,
+        amplitudeMax: amplitudeMaxInput.value,
+        frequencyMin: frequencyMinInput.value,
+        frequencyMax: frequencyMaxInput.value,
+        verticalCountMin: verticalCountMinInput.value,
+        verticalCountMax: verticalCountMaxInput.value,
+        horizontalCountMin: horizontalCountMinInput.value,
+        horizontalCountMax: horizontalCountMaxInput.value,
+        menuCollapsed: controlsPanel.classList.contains("collapsed")
+      };
+      sessionStorage.setItem("gridArtSettings", JSON.stringify(settings));
+    }
+
+    function loadSettings() {
+      const savedSettings = sessionStorage.getItem("gridArtSettings");
+      if (savedSettings) {
+        const settings = JSON.parse(savedSettings);
+        amplitudeSlider.value = settings.amplitude || amplitudeSlider.value;
+        frequencySlider.value = settings.frequency || frequencySlider.value;
+        seedInput.value = settings.seed || seedInput.value;
+        noiseTypeSelect.value = settings.noiseType || noiseTypeSelect.value;
+        lineModeSelect.value = settings.lineMode || lineModeSelect.value;
+        verticalCountSlider.value = settings.verticalCount || verticalCountSlider.value;
+        horizontalCountSlider.value = settings.horizontalCount || horizontalCountSlider.value;
+        amplitudeMinInput.value = settings.amplitudeMin || amplitudeMinInput.value;
+        amplitudeMaxInput.value = settings.amplitudeMax || amplitudeMaxInput.value;
+        frequencyMinInput.value = settings.frequencyMin || frequencyMinInput.value;
+        frequencyMaxInput.value = settings.frequencyMax || frequencyMaxInput.value;
+        verticalCountMinInput.value = settings.verticalCountMin || verticalCountMinInput.value;
+        verticalCountMaxInput.value = settings.verticalCountMax || verticalCountMaxInput.value;
+        horizontalCountMinInput.value = settings.horizontalCountMin || horizontalCountMinInput.value;
+        horizontalCountMaxInput.value = settings.horizontalCountMax || horizontalCountMaxInput.value;
+      }
+    }
+
+    /***** Helper Functions *****/
+    // Clamp a value between a minimum and maximum.
+    function clamp(val, min, max) {
+      return Math.max(min, Math.min(val, max));
+    }
+
+    // Compute spacing between grid points so that the first and last points lie exactly on the canvas edges.
+    function getSpacing() {
+      const spacingX = canvas.width / (parseInt(verticalCountSlider.value) - 1);
+      const spacingY = canvas.height / (parseInt(horizontalCountSlider.value) - 1);
+      return { spacingX, spacingY };
+    }
+
+    /*
+      getNoiseValue uses normalized coordinates.
+      Instead of passing grid indices directly, we compute:
+        nx = (i / (verticalCount - 1)) * noiseFieldWidth
+        ny = (j / (horizontalCount - 1)) * noiseFieldHeight
+      so that the noise field remains fixed regardless of grid resolution.
+    */
+    function getNoiseValue(nx, ny) {
+      const frequency = parseFloat(frequencySlider.value);
+      const amplitude = parseFloat(amplitudeSlider.value);
+      if (noiseTypeSelect.value === "sine") {
+        return Math.sin(nx * frequency) * Math.cos(ny * frequency) * amplitude;
+      } else if (noiseTypeSelect.value === "random") {
         return (Math.random() - 0.5) * 2 * amplitude;
-      } else if (noiseType === "perlin") {
-        // Use new random offsets and seed each time for a fresh Perlin pattern.
-        return noiseGen.perlin2(x * frequency + perlinXOffset, y * frequency + perlinYOffset) * amplitude;
+      } else if (noiseTypeSelect.value === "perlin") {
+        return noiseGen.perlin2(nx * frequency + perlinXOffset, ny * frequency + perlinYOffset) * amplitude;
       }
       return 0;
     }
 
-    // Pre-calculate the grid points with noise applied.
+    // Compute grid points with noise applied.
     function computePoints() {
+      const { spacingX, spacingY } = getSpacing();
+      const horizontalCount = parseInt(horizontalCountSlider.value);
+      const verticalCount = parseInt(verticalCountSlider.value);
       const points = [];
-      for (let y = 0; y <= rows; y++) {
-        points[y] = [];
-        for (let x = 0; x <= cols; x++) {
-          let dx = getNoise(x, y);
-          let dy = getNoise(y, x);
-          points[y][x] = {
-            x: x * spacingX + dx,
-            y: y * spacingY + dy
-          };
+      for (let j = 0; j < horizontalCount; j++) {
+        points[j] = [];
+        let ny = (j / (horizontalCount - 1)) * noiseFieldHeight;
+        for (let i = 0; i < verticalCount; i++) {
+          let nx = (i / (verticalCount - 1)) * noiseFieldWidth;
+          let dx = getNoiseValue(nx, ny);
+          let dy = getNoiseValue(ny, nx);
+          let xRaw = i * spacingX + dx;
+          let yRaw = j * spacingY + dy;
+          points[j][i] = { x: xRaw, y: yRaw };
         }
       }
       return points;
     }
 
-    // Draw the grid on the canvas.
+    // Adjust all points to canvas size.
+    function adjustPoints(points) {
+      const horizontalCount = parseInt(horizontalCountSlider.value);
+      const verticalCount = parseInt(verticalCountSlider.value);
+      let minX = Number.MAX_VALUE, minY = Number.MAX_VALUE;
+      let maxX = -Number.MAX_VALUE, maxY = -Number.MAX_VALUE;
+      for (let j = 0; j < horizontalCount; j++) {
+        for (let i = 0; i < verticalCount; i++) {
+          minX = Math.min(minX, points[j][i].x);
+          minY = Math.min(minY, points[j][i].y);
+          maxX = Math.max(maxX, points[j][i].x);
+          maxY = Math.max(maxY, points[j][i].y);
+        }
+      }
+      for (let j = 0; j < horizontalCount; j++) {
+        for (let i = 0; i < verticalCount; i++) {
+          points[j][i].x = ((points[j][i].x - minX) / (maxX - minX)) * canvas.width;
+          points[j][i].y = ((points[j][i].y - minY) / (maxY - minY)) * canvas.height;
+        }
+      }
+      return points;
+    }
+
+    // Draw the grid onto the canvas.
     function drawGrid() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.strokeStyle = "black";
       ctx.lineWidth = 1;
-      const points = computePoints();
-
-      // Draw horizontal lines if selected.
-      if (lineMode === "both" || lineMode === "horizontal") {
-        for (let y = 0; y < rows; y++) {
+      let points = computePoints();
+      points = adjustPoints(points);
+      const horizontalCount = parseInt(horizontalCountSlider.value);
+      const verticalCount = parseInt(verticalCountSlider.value);
+      if (lineModeSelect.value === "both" || lineModeSelect.value === "horizontal") {
+        for (let j = 0; j < horizontalCount; j++) {
           ctx.beginPath();
-          for (let x = 0; x <= cols; x++) {
-            ctx.lineTo(points[y][x].x, points[y][x].y);
+          for (let i = 0; i < verticalCount; i++) {
+            ctx.lineTo(points[j][i].x, points[j][i].y);
           }
           ctx.stroke();
         }
       }
-
-      // Draw vertical lines if selected.
-      if (lineMode === "both" || lineMode === "vertical") {
-        for (let x = 0; x < cols; x++) {
+      if (lineModeSelect.value === "both" || lineModeSelect.value === "vertical") {
+        for (let i = 0; i < verticalCount; i++) {
           ctx.beginPath();
-          for (let y = 0; y <= rows; y++) {
-            ctx.lineTo(points[y][x].x, points[y][x].y);
+          for (let j = 0; j < horizontalCount; j++) {
+            ctx.lineTo(points[j][i].x, points[j][i].y);
           }
           ctx.stroke();
         }
       }
     }
 
-    // Update UI parameters and regenerate the grid.
+    function stringtonumber(string)
+    {
+        var hash = 0;
+        if (string.length == 0) return hash;
+        for (i = 0; i < string.length; i++) {
+            char = string.charCodeAt(i);
+            hash = ((hash<<5)-hash)+char;
+            hash = hash & hash; // Convert to 32bit integer
+        }
+        return hash;
+    }
+
+    // Update parameters from the controls and redraw the grid.
     function updateAndDraw() {
-      amplitude = parseFloat(amplitudeSlider.value);
-      frequency = parseFloat(frequencySlider.value);
-      noiseType = noiseTypeSelect.value;
-      lineMode = lineModeSelect.value;
-      amplitudeValueDisplay.textContent = amplitude;
-      frequencyValueDisplay.textContent = frequency;
-
-      // For Perlin noise, re-seed and randomize offsets to create a new drawing.
-      if (noiseType === "perlin") {
-        noiseGen.seed(Math.random());
-        perlinXOffset = Math.random() * 1000;
-        perlinYOffset = Math.random() * 1000;
-      }
+      amplitudeValueDisplay.textContent = amplitudeSlider.value;
+      frequencyValueDisplay.textContent = frequencySlider.value;
+      // Update seed display text.
+      seedValueDisplay.textContent = seedInput.value;
+      verticalCountValueDisplay.textContent = verticalCountSlider.value;
+      horizontalCountValueDisplay.textContent = horizontalCountSlider.value;
+      // Set the seed for the noise generator (convert the text value to an integer).
+      noiseGen.seed(stringtonumber(seedInput.value));
       drawGrid();
+      saveSettings();
     }
 
-    // Export the current drawing as an SVG file.
+    // Export the current grid drawing as an SVG file.
     function exportToSVG() {
-      const points = computePoints();
+      const { spacingX, spacingY } = getSpacing();
+      let points = computePoints();
+      points = adjustPoints(points);
       let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${canvas.width}" height="${canvas.height}">`;
-
-      // Horizontal lines as polyline elements if selected.
-      if (lineMode === "both" || lineMode === "horizontal") {
-        for (let y = 0; y < rows; y++) {
+      if (lineModeSelect.value === "both" || lineModeSelect.value === "horizontal") {
+        for (let j = 0; j < parseInt(horizontalCountSlider.value); j++) {
           let linePoints = "";
-          for (let x = 0; x <= cols; x++) {
-            linePoints += `${points[y][x].x},${points[y][x].y} `;
+          for (let i = 0; i < parseInt(verticalCountSlider.value); i++) {
+            linePoints += `${points[j][i].x},${points[j][i].y} `;
           }
           svg += `<polyline fill="none" stroke="black" stroke-width="1" points="${linePoints.trim()}" />`;
         }
       }
-
-      // Vertical lines as polyline elements if selected.
-      if (lineMode === "both" || lineMode === "vertical") {
-        for (let x = 0; x < cols; x++) {
+      if (lineModeSelect.value === "both" || lineModeSelect.value === "vertical") {
+        for (let i = 0; i < parseInt(verticalCountSlider.value); i++) {
           let linePoints = "";
-          for (let y = 0; y <= rows; y++) {
-            linePoints += `${points[y][x].x},${points[y][x].y} `;
+          for (let j = 0; j < parseInt(horizontalCountSlider.value); j++) {
+            linePoints += `${points[j][i].x},${points[j][i].y} `;
           }
           svg += `<polyline fill="none" stroke="black" stroke-width="1" points="${linePoints.trim()}" />`;
         }
       }
       svg += `</svg>`;
-
-      // Create a blob and trigger a download.
       const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -234,16 +421,72 @@
       URL.revokeObjectURL(url);
     }
 
-    // Attach event listeners to UI elements.
+    /***** Event Listeners *****/
     amplitudeSlider.addEventListener("input", updateAndDraw);
     frequencySlider.addEventListener("input", updateAndDraw);
+    seedInput.addEventListener("input", updateAndDraw);
     noiseTypeSelect.addEventListener("change", updateAndDraw);
     lineModeSelect.addEventListener("change", updateAndDraw);
+    verticalCountSlider.addEventListener("input", updateAndDraw);
+    horizontalCountSlider.addEventListener("input", updateAndDraw);
     redrawButton.addEventListener("click", updateAndDraw);
     exportSVGButton.addEventListener("click", exportToSVG);
 
-    // Initial drawing.
-    drawGrid();
+    applyLimitsButton.addEventListener("click", function() {
+      // Update amplitude slider limits.
+      let ampMin = parseFloat(amplitudeMinInput.value);
+      let ampMax = parseFloat(amplitudeMaxInput.value);
+      amplitudeSlider.min = ampMin;
+      amplitudeSlider.max = ampMax;
+      if (parseFloat(amplitudeSlider.value) < ampMin) {
+        amplitudeSlider.value = ampMin;
+      } else if (parseFloat(amplitudeSlider.value) > ampMax) {
+        amplitudeSlider.value = ampMax;
+      }
+      amplitudeValueDisplay.textContent = amplitudeSlider.value;
+
+      // Update frequency slider limits.
+      let freqMin = parseFloat(frequencyMinInput.value);
+      let freqMax = parseFloat(frequencyMaxInput.value);
+      frequencySlider.min = freqMin;
+      frequencySlider.max = freqMax;
+      if (parseFloat(frequencySlider.value) < freqMin) {
+        frequencySlider.value = freqMin;
+      } else if (parseFloat(frequencySlider.value) > freqMax) {
+        frequencySlider.value = freqMax;
+      }
+      frequencyValueDisplay.textContent = frequencySlider.value;
+
+      // Update vertical count slider limits.
+      let vMin = parseInt(verticalCountMinInput.value);
+      let vMax = parseInt(verticalCountMaxInput.value);
+      verticalCountSlider.min = vMin;
+      verticalCountSlider.max = vMax;
+      if (parseInt(verticalCountSlider.value) < vMin) {
+        verticalCountSlider.value = vMin;
+      } else if (parseInt(verticalCountSlider.value) > vMax) {
+        verticalCountSlider.value = vMax;
+      }
+      verticalCountValueDisplay.textContent = verticalCountSlider.value;
+
+      // Update horizontal count slider limits.
+      let hMin = parseInt(horizontalCountMinInput.value);
+      let hMax = parseInt(horizontalCountMaxInput.value);
+      horizontalCountSlider.min = hMin;
+      horizontalCountSlider.max = hMax;
+      if (parseInt(horizontalCountSlider.value) < hMin) {
+        horizontalCountSlider.value = hMin;
+      } else if (parseInt(horizontalCountSlider.value) > hMax) {
+        horizontalCountSlider.value = hMax;
+      }
+      horizontalCountValueDisplay.textContent = horizontalCountSlider.value;
+
+      updateAndDraw();
+    });
+
+    // Load stored settings (if any) and draw the grid.
+    loadSettings();
+    updateAndDraw();
   </script>
 </body>
 </html>
