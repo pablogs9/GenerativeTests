@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Distorted Grid with Perlin, Line Mode & SVG Export</title>
+  <style>
+    body {
+      margin: 0;
+      background-color: white;
+      font-family: sans-serif;
+    }
+    /* Container for both the canvas and the controls */
+    .container {
+      display: flex;
+      flex-direction: row;
+      height: 100vh;
+    }
+    /* Controls panel styling */
+    .controls {
+      padding: 20px;
+      background-color: #f0f0f0;
+      border-right: 1px solid #ccc;
+      min-width: 200px;
+      box-sizing: border-box;
+    }
+    .controls label {
+      display: block;
+      margin-top: 15px;
+    }
+    .controls input,
+    .controls select,
+    .controls button {
+      width: 100%;
+      margin-top: 5px;
+    }
+    /* Center the canvas in its area */
+    .canvas-container {
+      flex-grow: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+  </style>
+  <!-- Include the noisejs library for Perlin noise -->
+  <script src="https://cdn.jsdelivr.net/npm/noisejs@2.1.0/index.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <div class="controls">
+      <h2>Settings</h2>
+
+      <label for="amplitude">Amplitude: <span id="amplitudeValue">10</span></label>
+      <input type="range" id="amplitude" min="0" max="50" step="0.1" value="10" />
+
+      <label for="frequency">Frequency: <span id="frequencyValue">0.1</span></label>
+      <input type="range" id="frequency" min="0.01" max="0.5" step="0.01" value="0.1" />
+
+      <label for="noiseType">Noise Type:</label>
+      <select id="noiseType">
+        <option value="sine">SineCosine</option>
+        <option value="random">Random</option>
+        <option value="perlin" selected>Perlin</option>
+      </select>
+
+      <label for="lineMode">Draw Lines:</label>
+      <select id="lineMode">
+        <option value="both" selected>Both</option>
+        <option value="horizontal">Horizontal</option>
+        <option value="vertical">Vertical</option>
+      </select>
+
+      <button id="redraw" style="margin-top:20px;">Redraw Grid</button>
+      <button id="exportSVG" style="margin-top:20px;">Export SVG</button>
+    </div>
+
+    <div class="canvas-container">
+      <canvas id="gridCanvas" width="600" height="800"></canvas>
+    </div>
+  </div>
+
+  <script>
+    // Create an instance of the Perlin noise generator.
+    const noiseGen = new Noise(Math.random());
+    // Offsets for Perlin noise regeneration.
+    let perlinXOffset = 0,
+        perlinYOffset = 0;
+
+    // Get canvas and context.
+    const canvas = document.getElementById("gridCanvas");
+    const ctx = canvas.getContext("2d");
+
+    // Grid settings.
+    const cols = 30; // Number of columns
+    const rows = 40; // Number of rows
+    const spacingX = canvas.width / cols;
+    const spacingY = canvas.height / rows;
+
+    // UI elements.
+    const amplitudeSlider = document.getElementById("amplitude");
+    const frequencySlider = document.getElementById("frequency");
+    const noiseTypeSelect = document.getElementById("noiseType");
+    const lineModeSelect = document.getElementById("lineMode");
+    const redrawButton = document.getElementById("redraw");
+    const exportSVGButton = document.getElementById("exportSVG");
+
+    const amplitudeValueDisplay = document.getElementById("amplitudeValue");
+    const frequencyValueDisplay = document.getElementById("frequencyValue");
+
+    // Default parameters.
+    let amplitude = parseFloat(amplitudeSlider.value);
+    let frequency = parseFloat(frequencySlider.value);
+    let noiseType = noiseTypeSelect.value;
+    let lineMode = lineModeSelect.value;
+
+    amplitudeValueDisplay.textContent = amplitude;
+    frequencyValueDisplay.textContent = frequency;
+
+    // Returns a noise value based on the selected type.
+    function getNoise(x, y) {
+      if (noiseType === "sine") {
+        return Math.sin(x * frequency) * Math.cos(y * frequency) * amplitude;
+      } else if (noiseType === "random") {
+        return (Math.random() - 0.5) * 2 * amplitude;
+      } else if (noiseType === "perlin") {
+        // Use new random offsets and seed each time for a fresh Perlin pattern.
+        return noiseGen.perlin2(x * frequency + perlinXOffset, y * frequency + perlinYOffset) * amplitude;
+      }
+      return 0;
+    }
+
+    // Pre-calculate the grid points with noise applied.
+    function computePoints() {
+      const points = [];
+      for (let y = 0; y <= rows; y++) {
+        points[y] = [];
+        for (let x = 0; x <= cols; x++) {
+          let dx = getNoise(x, y);
+          let dy = getNoise(y, x);
+          points[y][x] = {
+            x: x * spacingX + dx,
+            y: y * spacingY + dy
+          };
+        }
+      }
+      return points;
+    }
+
+    // Draw the grid on the canvas.
+    function drawGrid() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = "black";
+      ctx.lineWidth = 1;
+      const points = computePoints();
+
+      // Draw horizontal lines if selected.
+      if (lineMode === "both" || lineMode === "horizontal") {
+        for (let y = 0; y < rows; y++) {
+          ctx.beginPath();
+          for (let x = 0; x <= cols; x++) {
+            ctx.lineTo(points[y][x].x, points[y][x].y);
+          }
+          ctx.stroke();
+        }
+      }
+
+      // Draw vertical lines if selected.
+      if (lineMode === "both" || lineMode === "vertical") {
+        for (let x = 0; x < cols; x++) {
+          ctx.beginPath();
+          for (let y = 0; y <= rows; y++) {
+            ctx.lineTo(points[y][x].x, points[y][x].y);
+          }
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Update UI parameters and regenerate the grid.
+    function updateAndDraw() {
+      amplitude = parseFloat(amplitudeSlider.value);
+      frequency = parseFloat(frequencySlider.value);
+      noiseType = noiseTypeSelect.value;
+      lineMode = lineModeSelect.value;
+      amplitudeValueDisplay.textContent = amplitude;
+      frequencyValueDisplay.textContent = frequency;
+
+      // For Perlin noise, re-seed and randomize offsets to create a new drawing.
+      if (noiseType === "perlin") {
+        noiseGen.seed(Math.random());
+        perlinXOffset = Math.random() * 1000;
+        perlinYOffset = Math.random() * 1000;
+      }
+      drawGrid();
+    }
+
+    // Export the current drawing as an SVG file.
+    function exportToSVG() {
+      const points = computePoints();
+      let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${canvas.width}" height="${canvas.height}">`;
+
+      // Horizontal lines as polyline elements if selected.
+      if (lineMode === "both" || lineMode === "horizontal") {
+        for (let y = 0; y < rows; y++) {
+          let linePoints = "";
+          for (let x = 0; x <= cols; x++) {
+            linePoints += `${points[y][x].x},${points[y][x].y} `;
+          }
+          svg += `<polyline fill="none" stroke="black" stroke-width="1" points="${linePoints.trim()}" />`;
+        }
+      }
+
+      // Vertical lines as polyline elements if selected.
+      if (lineMode === "both" || lineMode === "vertical") {
+        for (let x = 0; x < cols; x++) {
+          let linePoints = "";
+          for (let y = 0; y <= rows; y++) {
+            linePoints += `${points[y][x].x},${points[y][x].y} `;
+          }
+          svg += `<polyline fill="none" stroke="black" stroke-width="1" points="${linePoints.trim()}" />`;
+        }
+      }
+      svg += `</svg>`;
+
+      // Create a blob and trigger a download.
+      const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "grid-art.svg";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }
+
+    // Attach event listeners to UI elements.
+    amplitudeSlider.addEventListener("input", updateAndDraw);
+    frequencySlider.addEventListener("input", updateAndDraw);
+    noiseTypeSelect.addEventListener("change", updateAndDraw);
+    lineModeSelect.addEventListener("change", updateAndDraw);
+    redrawButton.addEventListener("click", updateAndDraw);
+    exportSVGButton.addEventListener("click", exportToSVG);
+
+    // Initial drawing.
+    drawGrid();
+  </script>
+</body>
+</html>
