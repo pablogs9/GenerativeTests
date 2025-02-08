@@ -307,7 +307,8 @@
       const distortionFrequency = parseFloat(controls.distortionFrequency.value);
 
       const noiseScale = parseFloat(controls.noiseScale.value);
-      const noiseIntensity = parseFloat(controls.noiseIntensity.value);
+      // **IMPORTANT:** Subtract 500 from the noise intensity, just as in the canvas drawing.
+      const noiseIntensity = parseFloat(controls.noiseIntensity.value) - 500;
       const noiseOffset = parseFloat(controls.noiseOffset.value);
 
       const lineThickness = parseFloat(controls.lineThickness.value);
