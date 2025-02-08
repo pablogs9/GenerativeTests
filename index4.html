@@ -376,6 +376,7 @@
             // For each shape we define a clipPath for the shape boundary (rotated by shape.shapeRotation)
             // and then draw horizontal lines in a group that is transformed by shape.innerAngle.
             // Helper: Rotate a point p about (cx,cy) by given angle (in radians).
+            // Helper: Rotate a point p about (cx,cy) by given angle (in radians).
             function transform(p, cx, cy, angle) {
                 const dx = p.x - cx, dy = p.y - cy;
                 const cos = Math.cos(angle), sin = Math.sin(angle);
@@ -467,7 +468,7 @@
                 };
             }
 
-            // ---- Updated SVG Generation Using Pre-computed (Hard) Clipping ----
+            // ---- Updated SVG Generation Using Pre-computed (Hard) Clipping and Grouping ----
             function generateSVG() {
                 const width = canvas.width;
                 const height = canvas.height;
@@ -504,6 +505,9 @@
                         clipGeometry = { type: 'polygon', vertices: vertices };
                     }
 
+                    // Start a group for this shape.
+                    svg += `<g id="shape${index}">\n`;
+
                     // Set up parameters for drawing horizontal lines.
                     const lineSpacing = parseInt(lineDensitySlider.value, 10);
                     const diag = Math.sqrt(width * width + height * height);
@@ -515,7 +519,7 @@
                         // Define endpoints of the full horizontal line.
                         let A = { x: cx - diag, y: y };
                         let B = { x: cx + diag, y: y };
-                        // Apply the inner rotation (by shape.innerAngle) about (cx, cy)
+                        // Apply the inner rotation (by shape.innerAngle) about (cx, cy).
                         A = transform(A, cx, cy, shape.innerAngle);
                         B = transform(B, cx, cy, shape.innerAngle);
 
@@ -527,11 +531,14 @@
                             clippedSegment = clipLineToCircle(A.x, A.y, B.x, B.y, clipGeometry.cx, clipGeometry.cy, clipGeometry.r);
                         }
 
-                        // If clipping produced a segment, add it to the SVG.
+                        // If clipping produced a segment, add it as a line within the group.
                         if (clippedSegment) {
                             svg += `<line x1="${clippedSegment.x1.toFixed(2)}" y1="${clippedSegment.y1.toFixed(2)}" x2="${clippedSegment.x2.toFixed(2)}" y2="${clippedSegment.y2.toFixed(2)}" stroke="${shape.color}" stroke-width="1" />\n`;
                         }
                     }
+
+                    // End the group for this shape.
+                    svg += `</g>\n`;
                 });
 
                 svg += `</svg>`;
