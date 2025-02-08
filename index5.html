@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Penplotter Topographical Isolines</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      overflow: hidden;
+    }
+    #controls {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 100;
+      font-size: 14px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+    }
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <label>
+      Grid Size:
+      <input type="number" id="gridSize" value="80" min="20" max="200" step="1" />
+    </label>
+    <label>
+      Noise Scale:
+      <input type="number" id="noiseScale" value="10" step="0.1" />
+    </label>
+    <label>
+      Contour Step:
+      <input type="number" id="contourStep" value="0.1" step="0.01" />
+    </label>
+    <label>
+      Distortion:
+      <input type="number" id="distortion" value="5" step="0.1" />
+    </label>
+    <label>
+      Distortion Freq:
+      <input type="number" id="distortionFreq" value="5" step="0.1" />
+    </label>
+    <button id="generateBtn">Generate</button>
+    <button id="downloadSVGBtn">Download SVG</button>
+  </div>
+  <canvas id="canvas"></canvas>
+  <script>
+    // ─────────────────────────────────────────────
+    // Utility functions
+    // ─────────────────────────────────────────────
+    function lerp(a, b, t) {
+      return a + (b - a) * t;
+    }
+
+    // A “raw” pseudo–random noise function (returns values in [-1,1])
+    function rawNoise(x, y) {
+      var n = x + y * 57;
+      n = (n << 13) ^ n;
+      return 1.0 - ((n * (n * n * 15731 + 789221) + 1376312589) & 0x7fffffff) / 1073741824.0;
+    }
+
+    // Our noise returns values in [0,1]
+    function noise(x, y) {
+      let x0 = Math.floor(x), y0 = Math.floor(y);
+      let x1 = x0 + 1, y1 = y0 + 1;
+      let sx = x - x0, sy = y - y0;
+      let n00 = (rawNoise(x0, y0) + 1) / 2;
+      let n10 = (rawNoise(x1, y0) + 1) / 2;
+      let n01 = (rawNoise(x0, y1) + 1) / 2;
+      let n11 = (rawNoise(x1, y1) + 1) / 2;
+      let ix0 = lerp(n00, n10, sx);
+      let ix1 = lerp(n01, n11, sx);
+      return lerp(ix0, ix1, sy);
+    }
+
+    // Sample noise at a “vertex” (using normalized coordinates)
+    function sampleNoise(i, j, gridSize, noiseScale, distortion, distortionFreq) {
+      let u = i / gridSize;
+      let v = j / gridSize;
+      // Here the noise coordinate is “twisted” by a sine–based distortion:
+      let nx = u * noiseScale + distortion * Math.sin(v * distortionFreq);
+      let ny = v * noiseScale + distortion * Math.cos(u * distortionFreq);
+      return noise(nx, ny);
+    }
+
+    // Linear interpolation along an edge between two points p1 and p2
+    // where v1 and v2 are the noise values at those points.
+    function interpolate(p1, p2, v1, v2, threshold) {
+      let t = (threshold - v1) / (v2 - v1);
+      return {
+        x: lerp(p1.x, p2.x, t),
+        y: lerp(p1.y, p2.y, t)
+      };
+    }
+
+    // ─────────────────────────────────────────────
+    // Marching Squares per–cell function.
+    // We assume that each cell has four vertices:
+    //   p0 --- p1
+    //   |       |
+    //   p3 --- p2
+    // with noise values a, b, c, d respectively.
+    // We compute four interpolated points along the edges:
+    //   A (left edge: between p0 and p3),
+    //   B (bottom: between p3 and p2),
+    //   C (right: between p1 and p2),
+    //   D (top: between p0 and p1).
+    // Then we use a lookup table to return one (or two) line segments.
+    // ─────────────────────────────────────────────
+    function marchingSquaresCell(a, b, c, d, p0, p1, p2, p3, threshold) {
+      // Compute a 4-bit index (using the order: p0, p1, p2, p3)
+      let caseIndex = 0;
+      if (a >= threshold) caseIndex |= 8;
+      if (b >= threshold) caseIndex |= 4;
+      if (c >= threshold) caseIndex |= 2;
+      if (d >= threshold) caseIndex |= 1;
+      // Compute edge intersections:
+      let A = interpolate(p0, p3, a, d, threshold); // left edge
+      let B = interpolate(p3, p2, d, c, threshold); // bottom edge
+      let C = interpolate(p1, p2, b, c, threshold); // right edge
+      let D = interpolate(p0, p1, a, b, threshold); // top edge
+
+      // Lookup table (for reference, see comments below)
+      switch (caseIndex) {
+        case 0:
+        case 15:
+          return [];
+        case 1: // 0001: only p3 inside
+          return [[A, B]];
+        case 2: // 0010: only p2 inside
+          return [[B, C]];
+        case 3: // 0011: p2 and p3 inside
+          return [[A, C]];
+        case 4: // 0100: only p1 inside
+          return [[D, C]];
+        case 5: // 0101: ambiguous (p1 and p3 inside)
+          if ((a + c) < (b + d))
+            return [[D, A], [B, C]];
+          else
+            return [[D, C], [A, B]];
+        case 6: // 0110: p1 and p2 inside
+          return [[D, B]];
+        case 7: // 0111: all but p0 inside
+          return [[D, A]];
+        case 8: // 1000: only p0 inside
+          return [[D, A]];
+        case 9: // 1001: p0 and p3 inside
+          return [[D, B]];
+        case 10: // 1010: ambiguous (p0 and p2 inside)
+          if ((a + c) < (b + d))
+            return [[D, C], [A, B]];
+          else
+            return [[D, A], [B, C]];
+        case 11: // 1011: p0, p2, p3 inside
+          return [[D, C]];
+        case 12: // 1100: p0 and p1 inside
+          return [[A, C]];
+        case 13: // 1101: p0, p1, p3 inside
+          return [[B, C]];
+        case 14: // 1110: p0, p1, p2 inside
+          return [[A, B]];
+        default:
+          return [];
+      }
+    }
+
+    // ─────────────────────────────────────────────
+    // Attempt to join individual segments into continuous paths.
+    // Each segment is an array: [p, q] where p and q are {x,y}.
+    // We use a simple “greedy” join with a small tolerance.
+    // ─────────────────────────────────────────────
+    function joinSegments(segments) {
+      let paths = [];
+      const tol = 0.5; // pixels tolerance when matching endpoints
+      function pointsEqual(p1, p2) {
+        return Math.abs(p1.x - p2.x) < tol && Math.abs(p1.y - p2.y) < tol;
+      }
+      while (segments.length > 0) {
+        let seg = segments.pop();
+        let path = [seg[0], seg[1]];
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (let i = 0; i < segments.length; i++) {
+            let s = segments[i];
+            if (pointsEqual(path[path.length - 1], s[0])) {
+              path.push(s[1]);
+              segments.splice(i, 1);
+              changed = true;
+              break;
+            } else if (pointsEqual(path[path.length - 1], s[1])) {
+              path.push(s[0]);
+              segments.splice(i, 1);
+              changed = true;
+              break;
+            } else if (pointsEqual(path[0], s[1])) {
+              path.unshift(s[0]);
+              segments.splice(i, 1);
+              changed = true;
+              break;
+            } else if (pointsEqual(path[0], s[0])) {
+              path.unshift(s[1]);
+              segments.splice(i, 1);
+              changed = true;
+              break;
+            }
+          }
+        }
+        paths.push(path);
+      }
+      return paths;
+    }
+
+    // ─────────────────────────────────────────────
+    // Main: Generate isolines from the noise field.
+    // ─────────────────────────────────────────────
+    function generateArt() {
+      // Get parameter values from controls:
+      const gridSize = parseInt(document.getElementById("gridSize").value, 10);
+      const noiseScale = parseFloat(document.getElementById("noiseScale").value);
+      const contourStep = parseFloat(document.getElementById("contourStep").value);
+      const distortion = parseFloat(document.getElementById("distortion").value);
+      const distortionFreq = parseFloat(document.getElementById("distortionFreq").value);
+
+      // Set up canvas (full window):
+      const canvas = document.getElementById("canvas");
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // For simplicity, we define a square grid that spans the canvas width:
+      const cellSize = canvas.width / gridSize;
+
+      // Precompute a grid of noise values (for the grid vertices)
+      const gridValues = [];
+      for (let i = 0; i <= gridSize; i++) {
+        gridValues[i] = [];
+        for (let j = 0; j <= gridSize; j++) {
+          gridValues[i][j] = sampleNoise(i, j, gridSize, noiseScale, distortion, distortionFreq);
+        }
+      }
+
+      // Loop over threshold levels from 0 to 1:
+      let contours = [];
+      for (let t = 0; t <= 1.0001; t += contourStep) {
+        let segments = [];
+        for (let i = 0; i < gridSize; i++) {
+          for (let j = 0; j < gridSize; j++) {
+            // Retrieve the four noise values for the current cell:
+            const a = gridValues[i][j];
+            const b = gridValues[i + 1][j];
+            const c = gridValues[i + 1][j + 1];
+            const d = gridValues[i][j + 1];
+            // Define the four cell vertices (in canvas space):
+            const p0 = { x: i * cellSize, y: j * cellSize };
+            const p1 = { x: (i + 1) * cellSize, y: j * cellSize };
+            const p2 = { x: (i + 1) * cellSize, y: (j + 1) * cellSize };
+            const p3 = { x: i * cellSize, y: (j + 1) * cellSize };
+            // Compute the isoline segments for this cell at threshold t:
+            let cellSegments = marchingSquaresCell(a, b, c, d, p0, p1, p2, p3, t);
+            segments.push(...cellSegments);
+          }
+        }
+        // “Join” segments into continuous paths:
+        let paths = joinSegments(segments);
+        // Attach the current threshold level to each path (to allow variable stroke widths)
+        paths.forEach((p) => contours.push({ level: t, path: p }));
+      }
+
+      // Draw the contours on the canvas:
+      ctx.strokeStyle = "black";
+      contours.forEach((contour) => {
+        // For example, if the threshold level is (nearly) a multiple of 0.2, use a thicker stroke:
+        let thick = Math.abs(contour.level - Math.round(contour.level / 0.2) * 0.2) < 1e-3;
+        ctx.lineWidth = thick ? 2 : 0.5;
+        ctx.beginPath();
+        let path = contour.path;
+        if (path.length) {
+          ctx.moveTo(path[0].x, path[0].y);
+          for (let i = 1; i < path.length; i++) {
+            ctx.lineTo(path[i].x, path[i].y);
+          }
+          ctx.stroke();
+        }
+      });
+
+      // Save for SVG export:
+      window.contoursSVG = contours;
+    }
+
+    // ─────────────────────────────────────────────
+    // Create an SVG string from the contours and trigger a download.
+    // ─────────────────────────────────────────────
+    function downloadSVG() {
+      if (!window.contoursSVG) return;
+      const canvas = document.getElementById("canvas");
+      let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${canvas.width}" height="${canvas.height}">`;
+      svg += `<rect width="100%" height="100%" fill="white" />`;
+      window.contoursSVG.forEach((contour) => {
+        let thick = Math.abs(contour.level - Math.round(contour.level / 0.2) * 0.2) < 1e-3;
+        let strokeWidth = thick ? 2 : 0.5;
+        let d = "";
+        let path = contour.path;
+        if (path.length) {
+          d += `M ${path[0].x} ${path[0].y} `;
+          for (let i = 1; i < path.length; i++) {
+            d += `L ${path[i].x} ${path[i].y} `;
+          }
+        }
+        svg += `<path d="${d}" stroke="black" fill="none" stroke-width="${strokeWidth}" />`;
+      });
+      svg += `</svg>`;
+      let blob = new Blob([svg], { type: "image/svg+xml" });
+      let url = URL.createObjectURL(blob);
+      let a = document.createElement("a");
+      a.href = url;
+      a.download = "penplotter_art.svg";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+
+    // ─────────────────────────────────────────────
+    // Attach event listeners to the buttons.
+    // ─────────────────────────────────────────────
+    document.getElementById("generateBtn").addEventListener("click", generateArt);
+    document.getElementById("downloadSVGBtn").addEventListener("click", downloadSVG);
+
+    // Optionally, generate once on page load:
+    window.onload = generateArt;
+  </script>
+</body>
+</html>

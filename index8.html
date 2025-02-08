@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Spiral Generator with Distortion & SVG Download</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: #222;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      font-family: sans-serif;
+    }
+    canvas {
+      border: 1px solid #444;
+      margin-top: 20px;
+    }
+    #controls {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin: 20px;
+      gap: 10px;
+    }
+    .control {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin: 5px;
+    }
+    .control label {
+      font-size: 14px;
+      margin-bottom: 3px;
+    }
+    button {
+      padding: 5px 10px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" width="800" height="800"></canvas>
+  <div id="controls">
+    <!-- Spiral Settings -->
+    <div class="control">
+      <label for="spiralTurns">Spiral Turns (<span id="spiralTurnsVal">10</span>)</label>
+      <input type="range" id="spiralTurns" min="1" max="200" step="1" value="100">
+    </div>
+    <div class="control">
+      <label for="spiralGrowth">Spiral Growth (<span id="spiralGrowthVal">2</span>)</label>
+      <input type="range" id="spiralGrowth" min="0.1" max="1" step="0.1" value="0.3">
+    </div>
+    <div class="control">
+      <label for="angleStep">Angle Step (°) (<span id="angleStepVal">2</span>)</label>
+      <input type="range" id="angleStep" min="0.5" max="10" step="0.1" value="2">
+    </div>
+    <div class="control">
+      <label for="rotationOffset">Rotation Offset (°) (<span id="rotationOffsetVal">0</span>)</label>
+      <input type="range" id="rotationOffset" min="0" max="360" step="1" value="0">
+    </div>
+    <!-- Distortion Settings -->
+    <div class="control">
+      <label for="distortionAmplitude">Distortion Amplitude (<span id="distortionAmplitudeVal">10</span>)</label>
+      <input type="range" id="distortionAmplitude" min="0" max="10" step="0.1" value="0">
+    </div>
+    <div class="control">
+      <label for="distortionFrequency">Distortion Frequency (<span id="distortionFrequencyVal">3</span>)</label>
+      <input type="range" id="distortionFrequency" min="0" max="6" step="0.01" value="0">
+    </div>
+    <!-- Noise Settings -->
+    <div class="control">
+      <label for="noiseScale">Noise Scale (<span id="noiseScaleVal">0.02</span>)</label>
+      <input type="range" id="noiseScale" min="0" max="0.01" step="0.0001" value="0.01">
+    </div>
+    <div class="control">
+      <label for="noiseIntensity">Noise Intensity (<span id="noiseIntensityVal">10</span>)</label>
+      <input type="range" id="noiseIntensity" min="0" max="1000" step="1" value="10">
+    </div>
+    <div class="control">
+      <label for="noiseOffset">Noise Offset (<span id="noiseOffsetVal">0</span>)</label>
+      <input type="range" id="noiseOffset" min="0" max="110" step="0.01" value="0">
+    </div>
+    <!-- Drawing Settings -->
+    <div class="control">
+      <label for="lineThickness">Line Thickness (<span id="lineThicknessVal">2</span>)</label>
+      <input type="range" id="lineThickness" min="0.5" max="10" step="0.5" value="1">
+    </div>
+    <!-- Download Button -->
+    <div class="control">
+      <button id="downloadSVG">Download SVG</button>
+    </div>
+  </div>
+  <script>
+    /* -----------------------------------------
+       Perlin Noise Implementation
+       (Based on Ken Perlin’s improved noise algorithm)
+    ----------------------------------------- */
+    const permutation = [151,160,137,91,90,15,
+      131,13,201,95,96,53,194,233,7,225,140,36,103,30,69,142,
+      8,99,37,240,21,10,23,
+      190,6,148,247,120,234,75,0,26,197,62,94,252,219,203,117,
+      35,11,32,57,177,33,88,237,149,56,87,174,20,125,136,171,
+      168,68,175,74,165,71,134,139,48,27,166,77,146,158,231,83,
+      111,229,122,60,211,133,230,220,105,92,41,55,46,245,40,244,
+      102,143,54,65,25,63,161,1,216,80,73,209,76,132,187,208,
+      89,18,169,200,196,135,130,116,188,159,86,164,100,109,198,173,
+      186,3,64,52,217,226,250,124,123,5,202,38,147,118,126,255,
+      82,85,212,207,206,59,227,47,16,58,17,182,189,28,42,223,
+      183,170,213,119,248,152,2,44,154,163,70,221,153,101,155,167,
+      43,172,9,129,22,39,253,19,98,108,110,79,113,224,232,178,
+      185,112,104,218,246,97,228,251,34,242,193,238,210,144,12,191,
+      179,162,241,81,51,145,235,249,14,239,107,49,192,214,31,181,
+      199,106,157,184,84,204,176,115,121,50,45,127,4,150,254,138,
+      236,205,93,222,114,67,29,24,72,243,141,128,195,78,66,215,61,
+      156,180];
+
+    const p = new Array(512);
+    for (let i = 0; i < 256; i++) {
+      p[i] = permutation[i];
+      p[256 + i] = permutation[i];
+    }
+
+    function fade(t) {
+      return t * t * t * (t * (t * 6 - 15) + 10);
+    }
+
+    function lerp(t, a, b) {
+      return a + t * (b - a);
+    }
+
+    function grad(hash, x, y, z) {
+      const h = hash & 15;
+      const u = h < 8 ? x : y;
+      const v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
+      return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+    }
+
+    function perlinNoise(x, y, z) {
+      const X = Math.floor(x) & 255;
+      const Y = Math.floor(y) & 255;
+      const Z = Math.floor(z) & 255;
+
+      x -= Math.floor(x);
+      y -= Math.floor(y);
+      z -= Math.floor(z);
+
+      const u = fade(x);
+      const v = fade(y);
+      const w = fade(z);
+
+      const A  = p[X] + Y;
+      const AA = p[A] + Z;
+      const AB = p[A + 1] + Z;
+      const B  = p[X + 1] + Y;
+      const BA = p[B] + Z;
+      const BB = p[B + 1] + Z;
+
+      return lerp(w,
+                lerp(v,
+                  lerp(u, grad(p[AA], x, y, z),
+                          grad(p[BA], x - 1, y, z)
+                  ),
+                  lerp(u, grad(p[AB], x, y - 1, z),
+                          grad(p[BB], x - 1, y - 1, z)
+                  )
+                ),
+                lerp(v,
+                  lerp(u, grad(p[AA + 1], x, y, z - 1),
+                          grad(p[BA + 1], x - 1, y, z - 1)
+                  ),
+                  lerp(u, grad(p[AB + 1], x, y - 1, z - 1),
+                          grad(p[BB + 1], x - 1, y - 1, z - 1)
+                  )
+                )
+      );
+    }
+
+    /* -----------------------------------------
+       Canvas Drawing of the Spiral
+    ----------------------------------------- */
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    // Grab slider elements and their value-display spans
+    const controls = {
+      spiralTurns: document.getElementById('spiralTurns'),
+      spiralGrowth: document.getElementById('spiralGrowth'),
+      angleStep: document.getElementById('angleStep'),
+      rotationOffset: document.getElementById('rotationOffset'),
+      distortionAmplitude: document.getElementById('distortionAmplitude'),
+      distortionFrequency: document.getElementById('distortionFrequency'),
+      noiseScale: document.getElementById('noiseScale'),
+      noiseIntensity: document.getElementById('noiseIntensity'),
+      noiseOffset: document.getElementById('noiseOffset'),
+      lineThickness: document.getElementById('lineThickness')
+    };
+
+    const controlValues = {
+      spiralTurns: document.getElementById('spiralTurnsVal'),
+      spiralGrowth: document.getElementById('spiralGrowthVal'),
+      angleStep: document.getElementById('angleStepVal'),
+      rotationOffset: document.getElementById('rotationOffsetVal'),
+      distortionAmplitude: document.getElementById('distortionAmplitudeVal'),
+      distortionFrequency: document.getElementById('distortionFrequencyVal'),
+      noiseScale: document.getElementById('noiseScaleVal'),
+      noiseIntensity: document.getElementById('noiseIntensityVal'),
+      noiseOffset: document.getElementById('noiseOffsetVal'),
+      lineThickness: document.getElementById('lineThicknessVal')
+    };
+
+    function draw() {
+      // Read parameters from the sliders
+      const spiralTurns = parseFloat(controls.spiralTurns.value);
+      const spiralGrowth = parseFloat(controls.spiralGrowth.value);
+      const angleStepDeg = parseFloat(controls.angleStep.value);
+      const angleStep = angleStepDeg * Math.PI / 180; // convert to radians
+      const rotationOffsetDeg = parseFloat(controls.rotationOffset.value);
+      const rotationOffset = rotationOffsetDeg * Math.PI / 180;
+
+      // New distortion parameters
+      const distortionAmplitude = parseFloat(controls.distortionAmplitude.value);
+      const distortionFrequency = parseFloat(controls.distortionFrequency.value);
+
+      // Noise parameters
+      const noiseScale = parseFloat(controls.noiseScale.value);
+      const noiseIntensity = parseFloat(controls.noiseIntensity.value) - 500;
+      const noiseOffset = parseFloat(controls.noiseOffset.value);
+
+      const lineThickness = parseFloat(controls.lineThickness.value);
+
+      // Update displayed values next to each slider
+      controlValues.spiralTurns.textContent = spiralTurns;
+      controlValues.spiralGrowth.textContent = spiralGrowth;
+      controlValues.angleStep.textContent = angleStepDeg;
+      controlValues.rotationOffset.textContent = rotationOffsetDeg;
+      controlValues.distortionAmplitude.textContent = distortionAmplitude;
+      controlValues.distortionFrequency.textContent = distortionFrequency;
+      controlValues.noiseScale.textContent = noiseScale;
+      controlValues.noiseIntensity.textContent = noiseIntensity;
+      controlValues.noiseOffset.textContent = noiseOffset;
+      controlValues.lineThickness.textContent = lineThickness;
+
+      // Clear the canvas
+      ctx.fillStyle = "#222";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Set drawing style
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = lineThickness;
+      ctx.beginPath();
+
+      // Calculate the center of the canvas
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+      const maxAngle = spiralTurns * 2 * Math.PI;
+      let firstPoint = true;
+
+      // Generate the spiral points with extra radial distortion.
+      for (let angle = 0; angle < maxAngle; angle += angleStep) {
+        // Apply spiral growth plus an extra sinusoidal distortion to the radius.
+        const r = spiralGrowth * angle + distortionAmplitude * Math.sin(distortionFrequency * angle);
+        const x = cx + r * Math.cos(angle + rotationOffset);
+        const y = cy + r * Math.sin(angle + rotationOffset);
+
+        // Apply Perlin noise distortion
+        let nX = perlinNoise(x * noiseScale, y * noiseScale, noiseOffset);
+        let nY = perlinNoise(x * noiseScale, y * noiseScale, noiseOffset + 100);
+        let finalX = x + nX * noiseIntensity;
+        let finalY = y + nY * noiseIntensity;
+
+        if (firstPoint) {
+          ctx.moveTo(finalX, finalY);
+          firstPoint = false;
+        } else {
+          ctx.lineTo(finalX, finalY);
+        }
+      }
+
+      ctx.stroke();
+    }
+
+    // Redraw whenever any slider changes.
+    Object.values(controls).forEach(control => {
+      control.addEventListener('input', draw);
+    });
+
+    // Initial drawing.
+    draw();
+
+    /* -----------------------------------------
+       SVG Download Functionality
+    ----------------------------------------- */
+    function downloadSVG() {
+      // Read current parameters
+      const spiralTurns = parseFloat(controls.spiralTurns.value);
+      const spiralGrowth = parseFloat(controls.spiralGrowth.value);
+      const angleStepDeg = parseFloat(controls.angleStep.value);
+      const angleStep = angleStepDeg * Math.PI / 180;
+      const rotationOffsetDeg = parseFloat(controls.rotationOffset.value);
+      const rotationOffset = rotationOffsetDeg * Math.PI / 180;
+
+      const distortionAmplitude = parseFloat(controls.distortionAmplitude.value);
+      const distortionFrequency = parseFloat(controls.distortionFrequency.value);
+
+      const noiseScale = parseFloat(controls.noiseScale.value);
+      const noiseIntensity = parseFloat(controls.noiseIntensity.value);
+      const noiseOffset = parseFloat(controls.noiseOffset.value);
+
+      const lineThickness = parseFloat(controls.lineThickness.value);
+
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+      const maxAngle = spiralTurns * 2 * Math.PI;
+
+      let d = "";
+      let firstPoint = true;
+
+      for (let angle = 0; angle < maxAngle; angle += angleStep) {
+        const r = spiralGrowth * angle + distortionAmplitude * Math.sin(distortionFrequency * angle);
+        const x = cx + r * Math.cos(angle + rotationOffset);
+        const y = cy + r * Math.sin(angle + rotationOffset);
+
+        const nX = perlinNoise(x * noiseScale, y * noiseScale, noiseOffset);
+        const nY = perlinNoise(x * noiseScale, y * noiseScale, noiseOffset + 100);
+        const finalX = x + nX * noiseIntensity;
+        const finalY = y + nY * noiseIntensity;
+
+        if (firstPoint) {
+          d += `M ${finalX.toFixed(2)} ${finalY.toFixed(2)} `;
+          firstPoint = false;
+        } else {
+          d += `L ${finalX.toFixed(2)} ${finalY.toFixed(2)} `;
+        }
+      }
+
+      // Build the SVG string
+      const svgWidth = canvas.width;
+      const svgHeight = canvas.height;
+      const svgContent = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}" viewBox="0 0 ${svgWidth} ${svgHeight}">
+          <rect width="100%" height="100%" fill="#222" />
+          <path d="${d}" stroke="#fff" stroke-width="${lineThickness}" fill="none" />
+        </svg>
+      `;
+
+      const blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "spiral.svg";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    // Attach download function to the button.
+    document.getElementById('downloadSVG').addEventListener('click', downloadSVG);
+  </script>
+</body>
+</html>

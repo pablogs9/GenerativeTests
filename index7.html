@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Export Visible (Silhouette) Wireframe SVG</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+      }
+      #exportBtn {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        z-index: 10;
+        padding: 8px 12px;
+        background: #fff;
+        border: 1px solid #ccc;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <button id="exportBtn">Export SVG</button>
+    <!-- Three.js library -->
+    <script src="https://unpkg.com/three@0.140.0/build/three.min.js"></script>
+    <!-- OrbitControls -->
+    <script src="https://unpkg.com/three@0.140.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- STLLoader -->
+    <script src="https://unpkg.com/three@0.140.0/examples/js/loaders/STLLoader.js"></script>
+    <!-- Polyfill for THREE.Projector (needed by SVGRenderer) -->
+    <script>
+      if (!THREE.Projector) {
+        THREE.Projector = function () {};
+        THREE.Projector.prototype.projectVector = function (vector, camera) {
+          return vector.project(camera);
+        };
+        THREE.Projector.prototype.projectScene = function (scene, camera) {
+          const fovFactor = camera.projectionMatrix.elements[5];
+          const result = { objects: [] };
+          scene.traverse(function (object) {
+            if (
+              object.visible &&
+              (object instanceof THREE.Line ||
+                object instanceof THREE.Mesh ||
+                object instanceof THREE.LineSegments)
+            ) {
+              let geometry = object.geometry;
+              if (geometry && geometry.isBufferGeometry) {
+                const position = geometry.attributes.position;
+                const vertices = [];
+                for (let i = 0; i < position.count; i++) {
+                  const vertex = new THREE.Vector3().fromBufferAttribute(
+                    position,
+                    i
+                  );
+                  vertices.push(vertex);
+                }
+                geometry = { vertices: vertices };
+              }
+              if (geometry && geometry.vertices) {
+                const projected = [];
+                for (let i = 0, l = geometry.vertices.length; i < l; i++) {
+                  const vertex = geometry.vertices[i].clone();
+                  vertex.applyMatrix4(object.matrixWorld);
+                  vertex.project(camera);
+                  vertex.x *= fovFactor;
+                  vertex.y *= fovFactor;
+                  projected.push(vertex);
+                }
+                result.objects.push({ object: object, vertices: projected });
+              }
+            }
+          });
+          return result;
+        };
+      }
+    </script>
+    <!-- SVGRenderer -->
+    <script src="https://unpkg.com/three@0.140.0/examples/js/renderers/SVGRenderer.js"></script>
+    <script>
+      // Compute silhouette edges from a mesh.
+      // For each triangle face, we compute whether it is front‐facing (using the dot
+      // product between its normal and the view vector). Then, for each edge (defined by a sorted pair
+      // of vertex indices) we record the “front–back” status of its adjacent face(s).
+      // If an edge is adjacent to only one face or its two adjacent faces differ,
+      // then we add that edge.
+      function computeSilhouetteEdges(mesh, camera) {
+        // Make sure the mesh's geometry is indexed.
+        let geometry = mesh.geometry;
+        if (!geometry.index) {
+          console.error("Geometry must be indexed for silhouette computation.");
+          return null;
+        }
+        const posAttr = geometry.attributes.position;
+        const indexAttr = geometry.index;
+        const edgeData = {}; // key: "i_j" where i < j, value: array of booleans (face is front-facing)
+        const faceCount = indexAttr.count / 3;
+
+        // Temporary vectors to avoid extra allocations.
+        const vA = new THREE.Vector3(),
+          vB = new THREE.Vector3(),
+          vC = new THREE.Vector3(),
+          faceCenter = new THREE.Vector3(),
+          faceNormal = new THREE.Vector3(),
+          viewDir = new THREE.Vector3();
+
+        for (let i = 0; i < faceCount; i++) {
+          const ia = indexAttr.getX(i * 3);
+          const ib = indexAttr.getX(i * 3 + 1);
+          const ic = indexAttr.getX(i * 3 + 2);
+
+          vA.fromBufferAttribute(posAttr, ia);
+          vB.fromBufferAttribute(posAttr, ib);
+          vC.fromBufferAttribute(posAttr, ic);
+
+          // Transform vertices to world space.
+          vA.applyMatrix4(mesh.matrixWorld);
+          vB.applyMatrix4(mesh.matrixWorld);
+          vC.applyMatrix4(mesh.matrixWorld);
+
+          // Compute face center.
+          faceCenter.copy(vA).add(vB).add(vC).divideScalar(3);
+          // Compute face normal.
+          faceNormal
+            .subVectors(vB, vA)
+            .cross(new THREE.Vector3().subVectors(vC, vA))
+            .normalize();
+          // Compute view direction.
+          viewDir.subVectors(camera.position, faceCenter).normalize();
+          // Determine if face is front-facing.
+          const frontFacing = faceNormal.dot(viewDir) > 0;
+
+          // Helper to add an edge.
+          const addEdge = (i1, i2, front) => {
+            const key = i1 < i2 ? i1 + "_" + i2 : i2 + "_" + i1;
+            if (!edgeData[key]) {
+              edgeData[key] = [front];
+            } else {
+              edgeData[key].push(front);
+            }
+          };
+
+          addEdge(ia, ib, frontFacing);
+          addEdge(ib, ic, frontFacing);
+          addEdge(ic, ia, frontFacing);
+        }
+
+        // Now build an array of edge indices that qualify as silhouette edges.
+        const silhouetteIndices = [];
+        for (const key in edgeData) {
+          const flags = edgeData[key];
+          // If the edge is adjacent to one face or its adjacent faces disagree on visibility,
+          // then consider it part of the silhouette.
+          if (flags.length === 1 || (flags.length === 2 && flags[0] !== flags[1])) {
+            const parts = key.split("_");
+            silhouetteIndices.push(parseInt(parts[0]), parseInt(parts[1]));
+          }
+        }
+
+        // Build a new BufferGeometry containing the silhouette line segments.
+        const positions = [];
+        for (let i = 0; i < silhouetteIndices.length; i += 2) {
+          const i1 = silhouetteIndices[i],
+            i2 = silhouetteIndices[i + 1];
+          const v1 = new THREE.Vector3().fromBufferAttribute(posAttr, i1);
+          const v2 = new THREE.Vector3().fromBufferAttribute(posAttr, i2);
+          // Transform these vertices to world space.
+          v1.applyMatrix4(mesh.matrixWorld);
+          v2.applyMatrix4(mesh.matrixWorld);
+          positions.push(v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
+        }
+        const edgeGeom = new THREE.BufferGeometry();
+        edgeGeom.setAttribute(
+          "position",
+          new THREE.Float32BufferAttribute(positions, 3)
+        );
+        return edgeGeom;
+      }
+
+      // Global variables.
+      let scene, camera, webglRenderer, svgRenderer, controls;
+      // We'll store the original STL geometry and a preview mesh.
+      let modelGeometry, modelMesh;
+
+      init();
+      animate();
+
+      function init() {
+        // Create scene and camera.
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xffffff);
+        camera = new THREE.PerspectiveCamera(
+          45,
+          window.innerWidth / window.innerHeight,
+          1,
+          10000
+        );
+        camera.position.set(200, 200, 200);
+
+        // Create WebGL renderer for interactive view.
+        webglRenderer = new THREE.WebGLRenderer({ antialias: true });
+        webglRenderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(webglRenderer.domElement);
+
+        // OrbitControls for camera movement.
+        controls = new THREE.OrbitControls(camera, webglRenderer.domElement);
+
+        // Add some lights.
+        const ambientLight = new THREE.AmbientLight(0x404040);
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(1, 1, 1);
+        scene.add(directionalLight);
+        // Provide a legacy lights array for SVGRenderer.
+        scene.lights = scene.children.filter((child) => child.isLight);
+
+        // Load the STL file.
+        const loader = new THREE.STLLoader();
+        // Replace the URL below with your STL file path.
+        loader.load("nut.stl", function (geometry) {
+          modelGeometry = geometry;
+          // For the preview, use a basic wireframe via EdgesGeometry.
+          const previewEdges = new THREE.EdgesGeometry(geometry);
+          const lineMaterial = new THREE.LineBasicMaterial({ color: 0x000000 });
+          modelMesh = new THREE.LineSegments(previewEdges, lineMaterial);
+
+          // Center the model.
+          geometry.computeBoundingBox();
+          const center = new THREE.Vector3();
+          geometry.boundingBox.getCenter(center);
+          modelMesh.position.sub(center);
+          scene.add(modelMesh);
+        });
+
+        // Setup SVGRenderer for exporting.
+        svgRenderer = new THREE.SVGRenderer();
+        svgRenderer.setQuality(1);
+        svgRenderer.setSize(window.innerWidth, window.innerHeight);
+
+        window.addEventListener("resize", onWindowResize, false);
+        document
+          .getElementById("exportBtn")
+          .addEventListener("click", exportSVG);
+      }
+
+      function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        webglRenderer.setSize(window.innerWidth, window.innerHeight);
+        svgRenderer.setSize(window.innerWidth, window.innerHeight);
+      }
+
+      function animate() {
+        requestAnimationFrame(animate);
+        controls.update();
+        webglRenderer.render(scene, camera);
+      }
+
+      // On export, replace the preview mesh with silhouette edges.
+      function exportSVG() {
+        if (!modelGeometry) return;
+
+        // Remove the preview wireframe.
+        scene.remove(modelMesh);
+
+        // Create a temporary mesh using the original geometry
+        // so that its world transform (position, rotation, scale) is preserved.
+        const tempMesh = new THREE.Mesh(modelGeometry);
+        tempMesh.position.copy(modelMesh.position);
+        tempMesh.rotation.copy(modelMesh.rotation);
+        tempMesh.scale.copy(modelMesh.scale);
+        tempMesh.updateMatrixWorld();
+
+        // Compute the silhouette edges based on the current camera view.
+        const silhouetteGeom = computeSilhouetteEdges(tempMesh, camera);
+        if (!silhouetteGeom) return;
+
+        // Create a new LineSegments object for the silhouette.
+        modelMesh = new THREE.LineSegments(
+          silhouetteGeom,
+          new THREE.LineBasicMaterial({ color: 0x000000 })
+        );
+        scene.add(modelMesh);
+
+        // Render the scene with the SVGRenderer.
+        svgRenderer.render(scene, camera);
+        const serializer = new XMLSerializer();
+        const svgString = serializer.serializeToString(svgRenderer.domElement);
+        const blob = new Blob([svgString], {
+          type: "image/svg+xml;charset=utf-8",
+        });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "silhouette_wireframe.svg";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Colorful Overlapping Shapes with Inner & Shape Rotation and Color Sliders</title>
+  <style>
+    body {
+      text-align: center;
+      font-family: sans-serif;
+      margin: 20px;
+    }
+    .container {
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+    }
+    /* Controls panel on the left */
+    .controls {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      background: #f8f9fa;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      padding: 15px;
+      margin-right: 20px;
+      width: 300px;
+    }
+    .controls label {
+      margin: 10px 0;
+      font-size: 16px;
+    }
+    .controls button {
+      margin-top: 10px;
+      padding: 8px 12px;
+      background: #007bff;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .controls button:hover {
+      background: #0056b3;
+    }
+    /* Containers for individual sliders */
+    #innerAngleSliders,
+    #shapeRotationSliders,
+    #colorSliders {
+      margin-top: 15px;
+      width: 100%;
+      border-top: 1px solid #ccc;
+      padding-top: 10px;
+    }
+    #innerAngleSliders label,
+    #shapeRotationSliders label,
+    #colorSliders label {
+      display: block;
+      margin-bottom: 4px;
+    }
+    #innerAngleSliders input[type="range"],
+    #shapeRotationSliders input[type="range"],
+    #colorSliders input[type="range"] {
+      width: 250px;
+    }
+    canvas {
+      background: #fff;
+      /* No frame */
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Controls Panel -->
+    <div class="controls">
+      <label>
+        Shape Count: <span id="shapeCountVal">2</span>
+        <input type="range" id="shapeCount" min="2" max="5" value="2">
+      </label>
+      <label>
+        Line Density: <span id="lineDensityVal">6</span>
+        <input type="range" id="lineDensity" min="1" max="10" value="6">
+      </label>
+      <label>
+        Overlap Amount: <span id="overlapVal">50</span>
+        <!-- Overlap slider (in pixels) controls the radius of the forced overlap region -->
+        <input type="range" id="overlap" min="0" max="150" value="50">
+      </label>
+      <!-- Configurable shape size sliders -->
+      <label>
+        Min Shape Size (% of canvas): <span id="minShapeSizeVal">75</span>
+        <input type="range" id="minShapeSize" min="10" max="100" value="75">
+      </label>
+      <label>
+        Max Shape Size (% of canvas): <span id="maxShapeSizeVal">80</span>
+        <input type="range" id="maxShapeSize" min="10" max="100" value="80">
+      </label>
+      <button id="randomize">Randomize Shapes</button>
+        <!-- Download SVG button -->
+        <button id="downloadSVG">Download SVG</button>
+
+      <!-- Individual Inner Lines Angle Sliders (for each shape) -->
+      <div id="innerAngleSliders">
+        <!-- These sliders are created dynamically. Label: "Shape X Inner Angle:" -->
+      </div>
+
+      <!-- Individual Shape Rotation Sliders (for each shape) -->
+      <div id="shapeRotationSliders">
+        <!-- These sliders are created dynamically. Label: "Shape X Rotation:" -->
+      </div>
+
+      <!-- Individual Color Sliders -->
+      <div id="colorSliders">
+        <!-- Color sliders will be inserted here -->
+      </div>
+    </div>
+
+    <!-- Canvas Preview -->
+    <canvas id="myCanvas" width="800" height="600"></canvas>
+  </div>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", function() {
+      const canvas = document.getElementById("myCanvas");
+      const ctx = canvas.getContext("2d");
+
+      // The forced overlap region is a circle centered at the canvas center.
+      const commonX = canvas.width / 2;
+      const commonY = canvas.height / 2;
+      // Use the smaller canvas dimension as a basis for shape sizes.
+      const minDimension = Math.min(canvas.width, canvas.height);
+
+      // Get control elements.
+      const shapeCountSlider = document.getElementById("shapeCount");
+      const lineDensitySlider = document.getElementById("lineDensity");
+      const overlapSlider = document.getElementById("overlap");
+      const minShapeSizeSlider = document.getElementById("minShapeSize");
+      const maxShapeSizeSlider = document.getElementById("maxShapeSize");
+
+      const shapeCountVal = document.getElementById("shapeCountVal");
+      const lineDensityVal = document.getElementById("lineDensityVal");
+      const overlapVal = document.getElementById("overlapVal");
+      const minShapeSizeVal = document.getElementById("minShapeSizeVal");
+      const maxShapeSizeVal = document.getElementById("maxShapeSizeVal");
+
+      // Containers for individual sliders.
+      const innerAngleSlidersDiv = document.getElementById("innerAngleSliders");
+      const shapeRotationSlidersDiv = document.getElementById("shapeRotationSliders");
+      const colorSlidersDiv = document.getElementById("colorSliders");
+
+      let shapes = [];
+
+      // ---------- Utility Functions ----------
+      function randomRange(min, max) {
+        return min + Math.random() * (max - min);
+      }
+
+      function pointInPolygon(x, y, vertices) {
+        let inside = false;
+        for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+          const xi = vertices[i].x, yi = vertices[i].y;
+          const xj = vertices[j].x, yj = vertices[j].y;
+          const intersect = ((yi > y) !== (yj > y)) &&
+                            (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+          if (intersect) inside = !inside;
+        }
+        return inside;
+      }
+
+      // ---------- Transformation Functions ----------
+      // Rotate point p about (cx, cy) by given angle (radians)
+      function transform(p, cx, cy, angle) {
+        const dx = p.x - cx, dy = p.y - cy;
+        const cos = Math.cos(angle), sin = Math.sin(angle);
+        return { x: cx + cos * dx - sin * dy, y: cy + sin * dx + cos * dy };
+      }
+      // Inverse rotation by -angle.
+      function transformInverse(p, cx, cy, angle) {
+        const dx = p.x - cx, dy = p.y - cy;
+        const cos = Math.cos(-angle), sin = Math.sin(-angle);
+        return { x: cx + cos * dx - sin * dy, y: cy + sin * dx + cos * dy };
+      }
+
+      // ---------- Shape Generation ----------
+      // Checks if a circle (center cx,cy and radius r) is entirely inside a polygon.
+      function circleInsidePolygon(vertices, cx, cy, r) {
+        const samples = 8;
+        for (let i = 0; i < samples; i++) {
+          const theta = i * (2 * Math.PI / samples);
+          const testX = cx + r * Math.cos(theta);
+          const testY = cy + r * Math.sin(theta);
+          if (!pointInPolygon(testX, testY, vertices)) {
+            return false;
+          }
+        }
+        return true;
+      }
+
+      // Generate one random shape that always contains the forced overlap region.
+      function generateRandomShape() {
+        const types = ["square", "circle", "irregular"];
+        const type = types[Math.floor(Math.random() * types.length)];
+        // Create a shape object.
+        const shape = { type: type };
+        // Set the inner lines angle (as before) and also set a separate shape rotation.
+        shape.innerAngle = Math.random() * 2 * Math.PI;    // inner lines rotation
+        shape.shapeRotation = Math.random() * 2 * Math.PI;   // shape boundary rotation
+
+        const overlap = parseFloat(overlapSlider.value);
+
+        // Get the size range from the new sliders (values as a fraction of minDimension)
+        const minScale = parseFloat(minShapeSizeSlider.value) / 100;
+        const maxScale = parseFloat(maxShapeSizeSlider.value) / 100;
+
+        if (type === "square") {
+          const size = randomRange(minScale * minDimension, maxScale * minDimension);
+          const xMin = commonX + overlap - size;
+          const xMax = commonX - overlap;
+          const yMin = commonY + overlap - size;
+          const yMax = commonY - overlap;
+          const x = (xMin > xMax) ? commonX - size / 2 : randomRange(xMin, xMax);
+          const y = (yMin > yMax) ? commonY - size / 2 : randomRange(yMin, yMax);
+          shape.x = x;
+          shape.y = y;
+          shape.size = size;
+          shape.bbox = { x: x, y: y, width: size, height: size };
+
+        } else if (type === "circle") {
+          // Interpret the slider range as a diameter.
+          const diameter = randomRange(minScale * minDimension, maxScale * minDimension);
+          let radius = diameter / 2;
+          if (radius < overlap) radius = overlap;
+          const maxOffset = radius - overlap;
+          const rOffset = Math.random() * maxOffset;
+          const angleRand = Math.random() * 2 * Math.PI;
+          let x = commonX + rOffset * Math.cos(angleRand);
+          let y = commonY + rOffset * Math.sin(angleRand);
+          x = Math.max(radius, Math.min(canvas.width - radius, x));
+          y = Math.max(radius, Math.min(canvas.height - radius, y));
+          shape.x = x;
+          shape.y = y;
+          shape.radius = radius;
+          shape.bbox = { x: x - radius, y: y - radius, width: 2 * radius, height: 2 * radius };
+
+        } else if (type === "irregular") {
+          let vertices;
+          let attempts = 0;
+          do {
+            const width = randomRange(minScale * minDimension, maxScale * minDimension);
+            const height = randomRange(minScale * minDimension, maxScale * minDimension);
+            const xMin = Math.max(0, commonX - width);
+            const xMax = Math.min(commonX, canvas.width - width);
+            const yMin = Math.max(0, commonY - height);
+            const yMax = Math.min(commonY, canvas.height - height);
+            const x = (xMin <= xMax) ? randomRange(xMin, xMax) : commonX - width / 2;
+            const y = (yMin <= yMax) ? randomRange(yMin, yMax) : commonY - height / 2;
+
+            const dx = randomRange(-10, 10);
+            const dy = randomRange(-10, 10);
+            const dx2 = randomRange(-10, 10);
+            const dy2 = randomRange(-10, 10);
+
+            const v0 = { x: x, y: y };
+            const v1 = { x: x + width + dx, y: y + dy };
+            const v2 = { x: x + width + dx + dx2, y: y + height + dy + dy2 };
+            const v3 = { x: x + dx2, y: y + height + dy2 };
+            vertices = [v0, v1, v2, v3];
+            attempts++;
+          } while (!circleInsidePolygon(vertices, commonX, commonY, overlap) && attempts < 20);
+
+          shape.vertices = vertices;
+          const xs = vertices.map(v => v.x);
+          const ys = vertices.map(v => v.y);
+          const minX = Math.min(...xs);
+          const maxX = Math.max(...xs);
+          const minY = Math.min(...ys);
+          const maxY = Math.max(...ys);
+          shape.bbox = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+        }
+
+        // Also assign a coordinated HSL color (we update the color later via sliders).
+        const hue = Math.round(Math.random() * 360);
+        shape.h = hue;
+        shape.s = 70;
+        shape.l = 50;
+        shape.color = `hsl(${shape.h}, ${shape.s}%, ${shape.l}%)`;
+
+        return shape;
+      }
+
+      // ---------- Canvas Drawing (Preview) ----------
+      function randomizeShapes() {
+        shapes = [];
+        const count = parseInt(shapeCountSlider.value, 10);
+        for (let i = 0; i < count; i++) {
+          shapes.push(generateRandomShape());
+        }
+        draw();
+        updateInnerAngleSliders();
+        updateShapeRotationSliders();
+        updateColorSliders();
+      }
+
+      // In the canvas drawing routine:
+      // 1. Create a clipping region defined by the shape’s boundary rotated by shape.shapeRotation.
+      // 2. Then draw inner horizontal lines after applying a rotation by shape.innerAngle.
+      function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const lineSpacing = parseInt(lineDensitySlider.value, 10);
+        shapes.forEach(function(shape) {
+          drawShape(shape, lineSpacing);
+        });
+      }
+
+      function drawShape(shape, lineSpacing) {
+        ctx.save();
+        // Determine the center for transformations.
+        let cx, cy;
+        if (shape.type === "circle") {
+          cx = shape.x;
+          cy = shape.y;
+        } else {
+          cx = shape.bbox.x + shape.bbox.width / 2;
+          cy = shape.bbox.y + shape.bbox.height / 2;
+        }
+        // --- Create clipping region: shape boundary rotated by shape.shapeRotation ---
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(shape.shapeRotation);
+        ctx.translate(-cx, -cy);
+        ctx.beginPath();
+        if (shape.type === "square") {
+          ctx.rect(shape.x, shape.y, shape.size, shape.size);
+        } else if (shape.type === "circle") {
+          ctx.arc(shape.x, shape.y, shape.radius, 0, Math.PI * 2);
+        } else if (shape.type === "irregular") {
+          const verts = shape.vertices;
+          ctx.moveTo(verts[0].x, verts[0].y);
+          for (let i = 1; i < verts.length; i++) {
+            ctx.lineTo(verts[i].x, verts[i].y);
+          }
+          ctx.closePath();
+        }
+        ctx.restore(); // End transformation for clipping region definition.
+        ctx.clip();
+
+        // --- Draw inner horizontal lines, rotated by shape.innerAngle ---
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(shape.innerAngle);
+        ctx.translate(-cx, -cy);
+
+        ctx.strokeStyle = shape.color;
+        const diag = Math.sqrt(canvas.width * canvas.width + canvas.height * canvas.height);
+        for (let y = cy - diag; y <= cy + diag; y += lineSpacing) {
+          ctx.beginPath();
+          ctx.moveTo(cx - diag, y);
+          ctx.lineTo(cx + diag, y);
+          ctx.stroke();
+        }
+        ctx.restore();
+        ctx.restore();
+      }
+
+      // ---------- SVG Generation (Using ClipPaths & Group Transforms) ----------
+      // For each shape we define a clipPath for the shape boundary (rotated by shape.shapeRotation)
+      // and then draw horizontal lines in a group that is transformed by shape.innerAngle.
+      function generateSVG() {
+        const width = canvas.width;
+        const height = canvas.height;
+        let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">\n`;
+
+        // Define clipPaths for each shape.
+        svg += `<defs>\n`;
+        shapes.forEach((shape, index) => {
+          svg += `<clipPath id="clipShape${index}">\n`;
+          if (shape.type === "square") {
+            // Rotate the rect about its center.
+            const cx = shape.x + shape.size / 2;
+            const cy = shape.y + shape.size / 2;
+            svg += `<rect x="${shape.x}" y="${shape.y}" width="${shape.size}" height="${shape.size}" transform="rotate(${(shape.shapeRotation * 180 / Math.PI).toFixed(2)}, ${cx}, ${cy})" />\n`;
+          } else if (shape.type === "circle") {
+            // For circles rotation doesn’t change the shape.
+            svg += `<circle cx="${shape.x}" cy="${shape.y}" r="${shape.radius}" />\n`;
+          } else if (shape.type === "irregular") {
+            let points = shape.vertices.map(p => `${p.x},${p.y}`).join(" ");
+            const cx = shape.bbox.x + shape.bbox.width / 2;
+            const cy = shape.bbox.y + shape.bbox.height / 2;
+            svg += `<polygon points="${points}" transform="rotate(${(shape.shapeRotation * 180 / Math.PI).toFixed(2)}, ${cx}, ${cy})" />\n`;
+          }
+          svg += `</clipPath>\n`;
+        });
+        svg += `</defs>\n`;
+
+        // For each shape, draw a group of horizontal lines (transformed by innerAngle)
+        shapes.forEach((shape, index) => {
+          let cx, cy;
+          if (shape.type === "circle") {
+            cx = shape.x;
+            cy = shape.y;
+          } else {
+            cx = shape.bbox.x + shape.bbox.width / 2;
+            cy = shape.bbox.y + shape.bbox.height / 2;
+          }
+          svg += `<g clip-path="url(#clipShape${index})" transform="rotate(${(shape.innerAngle * 180 / Math.PI).toFixed(2)}, ${cx}, ${cy})">\n`;
+          const lineSpacing = parseInt(lineDensitySlider.value, 10);
+          const diag = Math.sqrt(width * width + height * height);
+          for (let y = cy - diag; y <= cy + diag; y += lineSpacing) {
+            svg += `<line x1="${cx - diag}" y1="${y}" x2="${cx + diag}" y2="${y}" stroke="${shape.color}" stroke-width="1" />\n`;
+          }
+          svg += `</g>\n`;
+        });
+
+        svg += `</svg>`;
+        return svg;
+      }
+
+      // ---------- Individual Inner Lines Angle Sliders ----------
+      function updateInnerAngleSliders() {
+        innerAngleSlidersDiv.innerHTML = ""; // Clear existing sliders.
+        shapes.forEach((shape, index) => {
+          const container = document.createElement("div");
+          container.style.marginTop = "10px";
+
+          const label = document.createElement("label");
+          label.textContent = "Shape " + (index + 1) + " Inner Angle: ";
+          const valueSpan = document.createElement("span");
+          valueSpan.textContent = Math.round(shape.innerAngle * 180 / Math.PI);
+          label.appendChild(valueSpan);
+          container.appendChild(label);
+
+          const slider = document.createElement("input");
+          slider.type = "range";
+          slider.min = "0";
+          slider.max = "360";
+          slider.value = Math.round(shape.innerAngle * 180 / Math.PI);
+          slider.addEventListener("input", function() {
+            const deg = parseFloat(slider.value);
+            valueSpan.textContent = deg;
+            shape.innerAngle = deg * Math.PI / 180;
+            draw();
+          });
+          container.appendChild(slider);
+          innerAngleSlidersDiv.appendChild(container);
+        });
+      }
+
+      // ---------- Individual Shape Rotation Sliders ----------
+      function updateShapeRotationSliders() {
+        shapeRotationSlidersDiv.innerHTML = ""; // Clear existing sliders.
+        shapes.forEach((shape, index) => {
+          const container = document.createElement("div");
+          container.style.marginTop = "10px";
+
+          const label = document.createElement("label");
+          label.textContent = "Shape " + (index + 1) + " Rotation: ";
+          const valueSpan = document.createElement("span");
+          valueSpan.textContent = Math.round(shape.shapeRotation * 180 / Math.PI);
+          label.appendChild(valueSpan);
+          container.appendChild(label);
+
+          const slider = document.createElement("input");
+          slider.type = "range";
+          slider.min = "0";
+          slider.max = "360";
+          slider.value = Math.round(shape.shapeRotation * 180 / Math.PI);
+          slider.addEventListener("input", function() {
+            const deg = parseFloat(slider.value);
+            valueSpan.textContent = deg;
+            shape.shapeRotation = deg * Math.PI / 180;
+            draw();
+          });
+          container.appendChild(slider);
+          shapeRotationSlidersDiv.appendChild(container);
+        });
+      }
+
+      // ---------- Individual Color Sliders ----------
+      function updateColorSliders() {
+        colorSlidersDiv.innerHTML = ""; // Clear existing sliders.
+        shapes.forEach((shape, index) => {
+          const container = document.createElement("div");
+          container.style.marginTop = "10px";
+          container.style.borderTop = "1px solid #ddd";
+          container.style.paddingTop = "10px";
+
+          const header = document.createElement("div");
+          header.style.fontWeight = "bold";
+          header.textContent = "Shape " + (index + 1) + " Color:";
+          container.appendChild(header);
+
+          // Hue Slider
+          const hueLabel = document.createElement("label");
+          hueLabel.textContent = "Hue: ";
+          const hueValue = document.createElement("span");
+          hueValue.textContent = shape.h;
+          hueLabel.appendChild(hueValue);
+          container.appendChild(hueLabel);
+
+          const hueSlider = document.createElement("input");
+          hueSlider.type = "range";
+          hueSlider.min = "0";
+          hueSlider.max = "360";
+          hueSlider.value = shape.h;
+          hueSlider.addEventListener("input", function() {
+            shape.h = parseInt(hueSlider.value, 10);
+            hueValue.textContent = shape.h;
+            shape.color = `hsl(${shape.h}, ${shape.s}%, ${shape.l}%)`;
+            draw();
+          });
+          container.appendChild(hueSlider);
+
+          // Saturation Slider
+          const satLabel = document.createElement("label");
+          satLabel.textContent = "Saturation: ";
+          const satValue = document.createElement("span");
+          satValue.textContent = shape.s;
+          satLabel.appendChild(satValue);
+          container.appendChild(satLabel);
+
+          const satSlider = document.createElement("input");
+          satSlider.type = "range";
+          satSlider.min = "0";
+          satSlider.max = "100";
+          satSlider.value = shape.s;
+          satSlider.addEventListener("input", function() {
+            shape.s = parseInt(satSlider.value, 10);
+            satValue.textContent = shape.s;
+            shape.color = `hsl(${shape.h}, ${shape.s}%, ${shape.l}%)`;
+            draw();
+          });
+          container.appendChild(satSlider);
+
+          // Lightness Slider
+          const lightLabel = document.createElement("label");
+          lightLabel.textContent = "Lightness: ";
+          const lightValue = document.createElement("span");
+          lightValue.textContent = shape.l;
+          lightLabel.appendChild(lightValue);
+          container.appendChild(lightLabel);
+
+          const lightSlider = document.createElement("input");
+          lightSlider.type = "range";
+          lightSlider.min = "0";
+          lightSlider.max = "100";
+          lightSlider.value = shape.l;
+          lightSlider.addEventListener("input", function() {
+            shape.l = parseInt(lightSlider.value, 10);
+            lightValue.textContent = shape.l;
+            shape.color = `hsl(${shape.h}, ${shape.s}%, ${shape.l}%)`;
+            draw();
+          });
+          container.appendChild(lightSlider);
+
+          colorSlidersDiv.appendChild(container);
+        });
+      }
+
+      // ---------- Event Handlers ----------
+      shapeCountSlider.addEventListener("input", function() {
+        shapeCountVal.textContent = shapeCountSlider.value;
+        randomizeShapes();
+      });
+
+      lineDensitySlider.addEventListener("input", function() {
+        lineDensityVal.textContent = lineDensitySlider.value;
+        draw();
+      });
+
+      overlapSlider.addEventListener("input", function() {
+        overlapVal.textContent = overlapSlider.value;
+        randomizeShapes();
+      });
+
+      minShapeSizeSlider.addEventListener("input", function() {
+        minShapeSizeVal.textContent = minShapeSizeSlider.value;
+        if (parseInt(minShapeSizeSlider.value) > parseInt(maxShapeSizeSlider.value)) {
+          maxShapeSizeSlider.value = minShapeSizeSlider.value;
+          maxShapeSizeVal.textContent = maxShapeSizeSlider.value;
+        }
+        randomizeShapes();
+      });
+
+      maxShapeSizeSlider.addEventListener("input", function() {
+        maxShapeSizeVal.textContent = maxShapeSizeSlider.value;
+        if (parseInt(maxShapeSizeSlider.value) < parseInt(minShapeSizeSlider.value)) {
+          minShapeSizeSlider.value = maxShapeSizeSlider.value;
+          minShapeSizeVal.textContent = minShapeSizeSlider.value;
+        }
+        randomizeShapes();
+      });
+
+      // Download SVG button: creates an SVG string (using clipPaths & group transforms) and downloads it.
+      const downloadSVGButton = document.getElementById("downloadSVG");
+      // (If you wish to add a button for SVG download, you can insert it in the controls.)
+      // For example:
+      // <button id="downloadSVG">Download SVG</button>
+      if (downloadSVGButton) {
+        downloadSVGButton.addEventListener("click", function() {
+          const svgString = generateSVG();
+          const blob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = "shapes.svg";
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        });
+      }
+
+        // Randomize button: generates new random shapes.
+        const randomizeButton = document.getElementById("randomize");
+        randomizeButton.addEventListener("click", function() {
+          randomizeShapes();
+        });
+
+      // ---------- Initial Drawing ----------
+      randomizeShapes();
+    });
+  </script>
+</body>
+</html>
